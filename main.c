@@ -119,6 +119,8 @@ VmaAllocator allocator;
 const uint32_t maxFramesInFlight = 2;
 VkCommandBuffer commandBuffers[2];
 Buffer shaderDataBuffers[2];
+Buffer drawCommandBuffers[2];
+Buffer drawCommandCountBuffer;
 
 Texture textures[3];//swapchain image count
 VkDescriptorImageInfo textureDescriptors[3];
@@ -427,7 +429,8 @@ int main()
         .shaderSampledImageArrayNonUniformIndexing = true,
         .descriptorBindingVariableDescriptorCount = true,
         .runtimeDescriptorArray = true,
-        .bufferDeviceAddress = true
+        .bufferDeviceAddress = true,
+        .drawIndirectCount = true,
     };
 
     VkPhysicalDeviceVulkan13Features features13 = {
@@ -614,6 +617,23 @@ int main()
             VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
             VMA_ALLOCATION_CREATE_MAPPED_BIT);
     }
+
+    for (uint32_t i = 0; i < maxFramesInFlight; i++) {
+        CreateBuffer(&drawCommandBuffers[i], sizeof(VkDrawIndexedIndirectCommand), 
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
+            VMA_MEMORY_USAGE_AUTO, 
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+            VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    }
+
+    CreateBuffer(&drawCommandCountBuffer, sizeof(uint32_t), 
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
+        VMA_MEMORY_USAGE_AUTO, 
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+        VMA_ALLOCATION_CREATE_MAPPED_BIT
+    );
 
     VkSemaphoreCreateInfo semaphoreCI = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -1049,8 +1069,18 @@ int main()
             shaderData.model[i] = HMM_Translate(instancePos);
         }
 
-        memcpy(shaderDataBuffers[frameIndex].allocInfo.pMappedData, &shaderData, sizeof(shaderData));
+        UploadBuffer(&shaderDataBuffers[frameIndex], &shaderData, sizeof(shaderData), 0);
 
+        VkDrawIndexedIndirectCommand indirectDrawCommand = {
+            .indexCount = array_count(geometry.indices),
+            .instanceCount = 3,
+            .firstIndex = 0,
+            .vertexOffset = 0,
+            .firstInstance = 0
+        };
+
+        UploadBuffer(&drawCommandBuffers[frameIndex], &indirectDrawCommand, sizeof(indirectDrawCommand), 0);
+        
         VkCommandBuffer cb = commandBuffers[frameIndex];
         VK_CHECK(vkResetCommandBuffer(cb, 0));
 
@@ -1060,13 +1090,21 @@ int main()
         };
 
         VK_CHECK(vkBeginCommandBuffer(cb, &cbBI));
+        
+        stageBarrier(cb, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+            VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, 
+            VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
+        );
 
-        //cull 
-        {
-            //barrier
-        
-        }
-        
+        vkCmdFillBuffer(cb, drawCommandCountBuffer.buffer, 0, sizeof(uint32_t), 3);
+
+        stageBarrier(cb, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT, 
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
+            VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
+        );
+
         //color and depth image need barriers for layout transitions
         VkImageMemoryBarrier2 colorBarrier = imageBarrier(swapchainImages[imageIndex],
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1152,7 +1190,7 @@ int main()
         vkCmdBindIndexBuffer(cb, iBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdPushConstants(cb, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &shaderDataBuffers[frameIndex].deviceAddress);
 
-        vkCmdDrawIndexed(cb, array_count(geometry.indices), 3, 0, 0, 0);
+        vkCmdDrawIndexedIndirectCount(cb, drawCommandBuffers[frameIndex].buffer, 0, drawCommandCountBuffer.buffer, 0, 1,sizeof(VkDrawIndexedIndirectCommand));
         vkCmdEndRendering(cb);
 
         VkImageMemoryBarrier2 barrierPresent = {
@@ -1287,8 +1325,10 @@ int main()
 
     vkDestroyCommandPool(device, commandPool, NULL);
 
+    DestroyBuffer(&drawCommandCountBuffer);
     for (uint32_t i = 0; i < maxFramesInFlight; i++) {
         DestroyBuffer(&shaderDataBuffers[i]);
+        DestroyBuffer(&drawCommandBuffers[i]);
     }
 
     for (uint32_t i = 0; i < maxFramesInFlight; i++) {
