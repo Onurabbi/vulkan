@@ -7,7 +7,7 @@ struct InputData
 
 [shader("compute")]
 [numthreads(1,1,1)]
-void computeMain(uint3 id : SV_DispatchThreadId)
+void main(uint3 id : SV_DispatchThreadId)
 {
     inputData.drawCount[id.x] = 1;
 }

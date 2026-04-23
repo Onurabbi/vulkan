@@ -34,17 +34,18 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
     set(SPIRV "${SPIRV_OUTPUT_DIR}${STEM}.spv")
     add_custom_command(
         OUTPUT ${SPIRV}
+        DEPENDS ${SLANG}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_OUTPUT_DIR}"
         COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV})
     list(APPEND SPIRV_BINARY_FILES ${SPIRV})
 endforeach()
 
-add_executable(HowToVulkan main.c vma.cpp)
+file(GLOB_RECURSE SOURCE_FILES "src/*.c" "src/*.cpp")
+add_executable(HowToVulkan ${SOURCE_FILES})
+
 target_compile_definitions(HowToVulkan PRIVATE VK_NO_PROTOTYPES)
 target_link_libraries(HowToVulkan PRIVATE SDL3::SDL3 ktx Vulkan::Vulkan ${CMAKE_DL_LIBS})
-set_target_properties(HowToVulkan PROPERTIES
-    SKIP_BUILD_RPATH TRUE
-)
+set_target_properties(HowToVulkan PROPERTIES SKIP_BUILD_RPATH TRUE)
 target_link_options(HowToVulkan PRIVATE "-Wl,-rpath,${CMAKE_BINARY_DIR}")
  
 add_custom_target(compile_shaders DEPENDS ${SPIRV_BINARY_FILES})
