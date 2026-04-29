@@ -9,16 +9,16 @@
 
 #include <stdbool.h>
 
-typedef HMM_Vec2 Vec2;
-typedef HMM_Vec3 Vec3;
-typedef HMM_Vec4 Vec4;
-typedef HMM_Mat4 Mat4;
-typedef HMM_Quat Quat;
+typedef HMM_Vec2 vec2_t;
+typedef HMM_Vec3 vec3_t;
+typedef HMM_Vec4 vec4_t;
+typedef HMM_Mat4 mat4_t;
+typedef HMM_Quat quat_t;
 
 typedef struct {
-    Vec3 p;
-    Vec3 n;
-    Vec2 t;
+    vec3_t p;
+    vec3_t n;
+    vec2_t t;
 } Vertex;
 
 typedef struct {
@@ -26,37 +26,37 @@ typedef struct {
     char *spirv; //dynamic array
     VkShaderStageFlagBits stage;
 
-    uint32_t localSizeX;
-    uint32_t localSizeY;
-    uint32_t localSizeZ;
+    u32 localSizeX;
+    u32 localSizeY;
+    u32 localSizeZ;
 
     bool usesPushConstants;
-} Shader;
+} shader_t;
 
 typedef struct {
-    Mat4 projection;
-    Mat4 view;
-    Mat4 model[3];
-    Vec4 lightPos;
-    uint32_t selected;
-} Globals;
+    mat4_t projection;
+    mat4_t view;
+    mat4_t model[3];
+    vec4_t lightPos;
+    u32 *selected;
+} globals_t;
 
 typedef struct {
     VkDeviceAddress globalsAddress;
-} ShaderData;
+} shader_data_t;
 
 typedef struct {
     VkPipelineLayout pipelineLayout;
     VkPipeline pipeline;
     VkShaderModule shaderModule;
-} Pipeline;
+} pipeline_t;
 
 void LoadShaders(void *data, memory_arena_t *arena);
 
-void CreateGraphicsPipeline(Pipeline *pipeline, const Shader *shaders, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, uint32_t pushConstantSize, VkDescriptorSetLayout setLayout);
-void DestroyGraphicsPipeline(Pipeline *pipeline, VkDevice device);
+void CreateGraphicsPipeline(pipeline_t *pipeline, const shader_t *shaders, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout);
+void DestroyGraphicsPipeline(pipeline_t *pipeline, VkDevice device);
 
-void CreateComputePipeline(Pipeline *pipeline, const Shader *shaders, VkDevice device, const char *name, uint32_t pushConstantSize);    
-void DestroyComputePipeline(Pipeline *pipeline, VkDevice device);
-VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, uint32_t descriptorCount);
+void CreateComputePipeline(pipeline_t *pipeline, const shader_t *shaders, VkDevice device, const char *name, u32 pushConstantSize);    
+void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device);
+VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount);
 #endif // VK_SHADER_H

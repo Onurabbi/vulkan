@@ -196,19 +196,17 @@ u64 hash(const u8* key, u32 length);
 /*******************************************************************************/
 
 const char *StringIntern(const char *str);
-void StringInterningInit(u32 capacity, u32 maxStringCount);
+void StringInterningInit(void);
 void StringInterningDeinit(void);
 
 #if defined (OG_DS_IMPLEMENTATION)
 
 static hash_map_t stringMap;
-static memory_arena_t stringArena;
-static memory_arena_t stringMapArena;
 
 static const char *PushString(const char *str)
 {
     size_t strSize = strlen(str) + 1;
-    char *result = PushArray(&stringArena, strSize, char);
+    char *result = PushArray(StringArena(), strSize, char);
     strncpy(result, str, strSize);
     return result;
 }
@@ -225,22 +223,17 @@ const char *StringIntern(const char *str)
     return result;
 }
 
-void StringInterningInit(u32 capacity, u32 maxStringCount)
+void StringInterningInit(void)
 {
-    maxStringCount *= 2; // max load factor of 0.5 for the hash map
-    ArenaInit(&stringMapArena, maxStringCount*sizeof(hash_entry_t));
-    HashMapInitWithArena(&stringMap, &stringMapArena, maxStringCount);
-
-    ArenaInit(&stringArena, capacity);
+    HashMapInitWithArena(&stringMap, PermanentArena(), MAX_STRING_COUNT);
     
-    char *dst = PushStruct(&stringArena, char);
+    char *dst = PushStruct(StringArena(), char);
     *dst = '\0'; // we want the first byte of the arena to be a null terminator so that we can return it for empty strings
 }
 
 void StringInterningDeinit(void)
 {
     HashMapFree(&stringMap);
-    ArenaDeinit(&stringArena);
 }
 
 #endif
@@ -417,7 +410,6 @@ void HashMapInitWithArena(hash_map_t *map, memory_arena_t *arena, u32 capacity)
 void HashMapFree(hash_map_t *map)
 {
     if (map->arena) {
-        ArenaDeinit(map->arena);
     } else {
         free(map->entries);
     }

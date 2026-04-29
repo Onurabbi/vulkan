@@ -49,10 +49,14 @@ void LogOutput(i32 severity, const char *format, ...)
         case ERROR:
             LOG_COLOURED(stderr, buffer2, ANSI_COLOR_RED);
             break;
+        case FATAL:
+            LOG_COLOURED(stderr, buffer2, ANSI_COLOR_RED);
+            break;
         default:
             break;
     }
     fflush(stdout);
+    fflush(stderr);
 }
 
 LV_EXPORT void ReportAssertionFailure(const char *expr)

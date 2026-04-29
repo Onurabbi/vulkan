@@ -4,12 +4,12 @@
 
 #include <string.h>
 
-void UploadBuffer(Buffer *buffer, const void *data, VkDeviceSize size, VkDeviceSize offset)
+void UploadBuffer(buffer_t *buffer, const void *data, VkDeviceSize size, VkDeviceSize offset)
 {
     memcpy((char*)buffer->allocInfo.pMappedData + offset, data, size);
 }
 
-void CreateBuffer(Buffer *buffer, VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VmaAllocator allocator)
+void CreateBuffer(buffer_t *buffer, VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VmaAllocator allocator)
 {
     buffer->size = size;
 
@@ -35,7 +35,7 @@ void CreateBuffer(Buffer *buffer, VkDevice device, VkDeviceSize size, VkBufferUs
     }
 }
 
-void DestroyBuffer(Buffer *buffer, VmaAllocator allocator)
+void DestroyBuffer(buffer_t *buffer, VmaAllocator allocator)
 {
     vmaDestroyBuffer(allocator, buffer->buffer, buffer->allocation);
 }

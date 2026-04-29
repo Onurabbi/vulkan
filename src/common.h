@@ -134,6 +134,7 @@ do { \
 } while(0)
 
 //Limits
+#define SCANCODE_COUNT 512
 #define MAX_THREADS 32
 #define MAX_JOBS 256
 #define STRING_ARENA_CAPACITY MEGABYTES(1)
@@ -143,5 +144,37 @@ do { \
 #define MAX_VERTICES (1U * 1024U * 1024U)
 #define MAX_INDICES (1U * 1024U * 1024U)
 #define MAX_MESHES (1U * 1024U) 
+
+typedef void *vulkan_instance_t;
+typedef void *vulkan_physical_device_t;
+
+typedef struct {
+   b8 (*VulkanGetPresentationSupport)(vulkan_instance_t instance, vulkan_physical_device_t physical_device, u32 queue);
+   b8 (*CreateWindow)(void* window, void *arg, const char *title, i32 w, i32 h, u64 flags);
+}platform_api_t;
+
+typedef struct {
+   void *memoryBase;
+   u64   memorySize;
+   u32   threadCount;
+   char const* const* vulkanInstanceExtensions;
+   u32 vulkanInstanceExtensionCount;
+   platform_api_t api;
+} game_memory_t;
+
+typedef struct {
+   b32 event;
+   b32 down;
+   b32 repeat;
+}key_event_t;
+
+typedef struct {
+   const b8* keyboardState;
+   key_event_t keyEvents[SCANCODE_COUNT];
+   f32 mouseX, mouseY;
+   f32 mouseXRel, mouseYRel;
+   b8 quit;
+   b8 windowResized;
+} game_input_t;
 
 #endif // OG_COMMON_H

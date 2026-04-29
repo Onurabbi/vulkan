@@ -14,6 +14,7 @@ static SDL_Mutex *jobQueueMutex;
 static SDL_Condition *jobQueueCond;
 static job_t jobQueue[MAX_JOBS];
 static u32 jobCount;
+static u32 activeJobCount;
 static bool shutdownFlag;
 
 static void KillWorkerThreads(void)
@@ -59,11 +60,17 @@ static i32 WorkerThreadFunc(void *data)
         }
 
         jobCount--;
+        activeJobCount++;
 
         SDL_BroadcastCondition(jobQueueCond); 
         SDL_UnlockMutex(jobQueueMutex);
 
         job.jobFunc(job.data, ScratchArena(threadIndex));
+
+        SDL_LockMutex(jobQueueMutex);
+        activeJobCount--;
+        SDL_BroadcastCondition(jobQueueCond);
+        SDL_UnlockMutex(jobQueueMutex);
     }
 
     LOGI("Worker thread %u exiting", threadIndex);
@@ -89,7 +96,7 @@ void JobSystemPushJob(void (*jobFunc)(void *data, memory_arena_t *arena), void *
 void JobSystemWaitForAllJobs(void)
 {
     SDL_LockMutex(jobQueueMutex);
-    while (jobCount > 0) {
+    while (activeJobCount > 0  || jobCount > 0) {
         SDL_WaitCondition(jobQueueCond, jobQueueMutex); 
     }
     SDL_BroadcastCondition(jobQueueCond);

@@ -14,7 +14,7 @@ typedef struct {
     VkSampler sampler;
 }Texture;
 
-bool CreateTexture(Texture *texture, VkDescriptorImageInfo *imageInfo, Buffer *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path);
+bool CreateTexture(Texture *texture, VkDescriptorImageInfo *imageInfo, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path);
 void DestroyTexture(Texture *texture, VmaAllocator allocator, VkDevice device);
 VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mipLevels);
 VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  VkImageUsageFlags usage, uint32_t width, uint32_t height, uint32_t mipLevels, VmaAllocation *allocation);

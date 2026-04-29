@@ -8,7 +8,7 @@
 #include <ktx.h>
 #include <ktxvulkan.h>
 
-bool CreateTexture(Texture *texture, VkDescriptorImageInfo *imageInfo, Buffer *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path)
+bool CreateTexture(Texture *texture, VkDescriptorImageInfo *imageInfo, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path)
 {
     ktxTexture *ktxTex = NULL;
     KTX_error_code err = ktxTexture_CreateFromNamedFile(path, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTex);
