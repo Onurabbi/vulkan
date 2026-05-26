@@ -1,6 +1,6 @@
-#include "common.h"
+#include "../common.h"
 #include "buffer.h"
-#include <volk/volk.h>
+#include "volk.h"
 
 #include <string.h>
 

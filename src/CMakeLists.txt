@@ -8,10 +8,6 @@ else()
     message(STATUS "Found Vulkan SDK in $ENV{VULKAN_SDK}")
 endif()
 
-include_directories(SYSTEM $ENV{VULKAN_SDK}/include)
-find_package(Vulkan REQUIRED)
-find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
-
 # set the output directory for built objects.
 # This makes sure that the dynamic library goes into the build directory automatically.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -34,17 +30,27 @@ foreach(SLANG ${SLANG_SOURCE_FILES})
     set(SPIRV "${SPIRV_OUTPUT_DIR}${STEM}.spv")
     add_custom_command(
         OUTPUT ${SPIRV}
-        DEPENDS ${SLANG}
+        DEPENDS ${SLANG} "../assets/mesh.h"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_OUTPUT_DIR}"
-        COMMAND ${SLANGC} ${SLANG} -target spirv -o ${SPIRV})
+        COMMAND ${SLANGC} ${SLANG} -target spirv -fvk-use-scalar-layout -o ${SPIRV})
     list(APPEND SPIRV_BINARY_FILES ${SPIRV})
 endforeach()
 
-file(GLOB SOURCE_FILES "*.c" "*.cpp")
-add_library(Game SHARED ${SOURCE_FILES})
+add_library(Game SHARED "game.c"
+                        "log.c"
+                        "og_ds.c"
+                        "platform.c"
+                        "renderer.c"
+                        "string_intern.c"
+                        "vulkan/vulkan.c"
+                        "vulkan/buffer.c"
+                        "vulkan/shader.c"
+                        "vulkan/texture.c"
+                        "vulkan/vma.cpp"
+                        "vulkan/volk.c")
 
-target_compile_definitions(Game PRIVATE VK_NO_PROTOTYPES)
-target_link_libraries(Game PRIVATE SDL3::SDL3 ktx Vulkan::Vulkan ${CMAKE_DL_LIBS})
+target_link_libraries(Game PRIVATE SDL3::SDL3 ktx)
+target_include_directories(Game PRIVATE "extern")
 
 add_custom_target(compile_shaders DEPENDS ${SPIRV_BINARY_FILES})
 add_dependencies(Game compile_shaders)

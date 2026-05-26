@@ -2,7 +2,6 @@
 #include "log.h"
 
 #include <stdio.h>
-#include <stdarg.h>
 
 #define LOG_COLOURED(stream,string, color) fprintf(stream, color "%s" ANSI_COLOR_RESET, string)
 const ssize_t buf_size = 1024;

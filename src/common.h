@@ -1,6 +1,9 @@
 #ifndef OG_COMMON_H
 #define OG_COMMON_H
 
+#include <stdarg.h>
+#include <stddef.h>
+
 #define ARRAY_SIZE(arr) (uint32_t)(sizeof(arr)/(sizeof((arr)[0])))
 
 typedef unsigned char      u8;
@@ -104,21 +107,26 @@ extern void __cdecl __debugbreak(void);
 #define lv_debug_break() ((void*)0=0)
 #endif
 
-#ifdef LV_ASSERTIONS_ENABLED
-
 LV_EXPORT void ReportAssertionFailure(const char *expr);
+
+#ifdef LV_ASSERTIONS_ENABLED
 
 #define LV_ASSERT(expr)                       \
 do                                            \
 {                                             \
 if (!(expr)) {                                \
-ReportAssertionFailure(#expr);              \
+ReportAssertionFailure(#expr);                \
 lv_debug_break();                             \
 }                                             \
 } while(0)
-
 #else
-#define LV_ASSERT(expr)
+#define LV_ASSERT(expr)                       \
+do                                            \
+{                                             \
+if (!(expr)) {                                \
+ReportAssertionFailure(#expr);                \
+}                                             \
+} while(0)
 #endif
 
 #define BIT_SET(num, bit) ((num) |= (1 << (bit)))
@@ -126,12 +134,7 @@ lv_debug_break();                             \
 #define BIT_CHECK(num, bit) ((num) & (1 << (bit)))
 #define BIT_FLIP(num, bit) ((num) ^= (1 << (bit)))
 
-#define VK_CHECK(expr) \
-do { \
-    if (expr != VK_SUCCESS) { \
-        LV_ASSERT(false && #expr" returned a result other than VK_SUCCESS"); \
-    } \
-} while(0)
+#define VK_CHECK(expr) LV_ASSERT((expr) == VK_SUCCESS)
 
 //Limits
 #define SCANCODE_COUNT 512
@@ -149,17 +152,34 @@ typedef void *vulkan_instance_t;
 typedef void *vulkan_physical_device_t;
 
 typedef struct {
+   void *base;
+   u64  size;
+   u64  used;
+}memory_arena_t;
+
+#define ARENA_BOOTSTRAP_SIZE(capacity) ((capacity) + sizeof(memory_arena_t))
+#define PushArray(arena, count, type) (type*)ArenaPushSize((arena), (count) * sizeof(type))
+#define PushStruct(arena, type) PushArray((arena), 1, type)
+
+typedef struct {
    b8 (*VulkanGetPresentationSupport)(vulkan_instance_t instance, vulkan_physical_device_t physical_device, u32 queue);
    b8 (*CreateWindow)(void* window, void *arg, const char *title, i32 w, i32 h, u64 flags);
+   void (*PushJob)(void(*jobFunc)(void*,memory_arena_t*), void*);
+   void (*WaitForAllJobs)(void);
+   memory_arena_t *(*PermanentArena)(void);
+   memory_arena_t *(*ScratchArena)(u32 threadIndex);
+   memory_arena_t *(*StringArena)(void);
+   const char *(*ArenaPrintf)(memory_arena_t *arena, const char *fmt, va_list args);
+   void *(*ArenaPushSize)(memory_arena_t *arena, u64 size);
+   void (*ArenaFreeToMarker)(memory_arena_t *arena, u64 marker);
+   u64 (*ArenaGetMarker)(memory_arena_t *arena);
+   char const* const* vulkanInstanceExtensions;
+   u32 vulkanInstanceExtensionCount;
 }platform_api_t;
 
 typedef struct {
-   void *memoryBase;
-   u64   memorySize;
-   u32   threadCount;
-   char const* const* vulkanInstanceExtensions;
-   u32 vulkanInstanceExtensionCount;
    platform_api_t api;
+   void *gameState;
 } game_memory_t;
 
 typedef struct {

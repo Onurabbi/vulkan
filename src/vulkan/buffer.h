@@ -2,8 +2,8 @@
 #ifndef VK_BUFFER_H
 #define VK_BUFFER_H
 
-#include <vulkan/vulkan.h>
-#include <vma/vk_mem_alloc.h>
+#include "volk.h"
+#include "vma.h"
 
 typedef struct {
     VmaAllocation allocation;
