@@ -1,5 +1,6 @@
 #include "../common.h"
 #include "texture.h"
+#include "buffer.h"
 #include "volk.h"
 #include "vma.h"
 

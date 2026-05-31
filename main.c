@@ -1,7 +1,7 @@
 #include "src/common.h"
 #include "src/limits.h"
 
-#include "volk.h"
+#include "src/vulkan/volk.h"
 #include "src/log.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>

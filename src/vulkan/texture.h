@@ -1,7 +1,6 @@
 #ifndef VK_TEXTURE_H
 #define VK_TEXTURE_H
 
-#include "../common.h"
 #include "vulkan_types.h"
 
 b8 CreateTexture(texture_t *texture, VkDescriptorImageInfo *imageInfo, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path);

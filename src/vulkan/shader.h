@@ -1,54 +1,7 @@
 #ifndef VK_SHADER_H
 #define VK_SHADER_H
 
-#include "../common.h"
-#include "../og_ds.h"
-#include "../string_intern.h"
-#include "volk.h"
-
-#include <HandmadeMath.h>
-
-typedef struct {
-    vec3_t p;
-    vec3_t n;
-    vec2_t t;
-} Vertex;
-
-typedef struct {
-    const char *name;
-    char *spirv; //dynamic array
-    VkShaderStageFlagBits stage;
-
-    u32 localSizeX;
-    u32 localSizeY;
-    u32 localSizeZ;
-
-    b8 usesPushConstants;
-} shader_t;
-
-typedef struct {
-    f32 P00, P11, near, far;
-    f32 frustum[4];
-    mat4_t projection;
-    mat4_t view;
-    vec4_t lightPos;
-    u32 selected;
-    u32 drawCount;
-} globals_t;
-
-typedef struct {
-    VkDeviceAddress globalsAddress;
-    VkDeviceAddress meshAddress;
-    VkDeviceAddress drawCommandAddress;
-    VkDeviceAddress drawCommandCountAddress;
-    VkDeviceAddress drawDataAddress;
-} shader_data_t;
-
-typedef struct {
-    VkPipelineLayout pipelineLayout;
-    VkPipeline pipeline;
-    VkShaderModule shaderModule;
-} pipeline_t;
+#include "vulkan_types.h"
 
 void LoadShaders(void *data, memory_arena_t *arena);
 

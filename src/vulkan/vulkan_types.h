@@ -5,17 +5,16 @@
 #include "../limits.h"
 
 #ifndef VULKAN_H_
-#include <vulkan/vk_platform.h>
-#include <vulkan/vulkan_core.h>
+#include "volk.h"
+#endif
+
+#ifndef HANDMADE_MATH_H
+#include <HandmadeMath.h>
 #endif
 
 #ifndef AMD_VULKAN_MEMORY_ALLOCATOR_H
 #include "vma.h"
 #endif
-
-typedef enum VkFormat VkFormat;
-typedef enum VmaMemoryUsage VmaMemoryUsage;
-typedef u32 VmaAllocationFlags;
 
 typedef struct SDL_Window SDL_Window;
 
@@ -68,6 +67,12 @@ typedef struct {
 } mesh_t;
 
 typedef struct {
+    vec3_t p;
+    vec3_t n;
+    vec2_t t;
+} Vertex;
+
+typedef struct {
     f32 rx,ry,rz,rw; //because quat_t forces 16 byte alignment
     vec3_t position;
     f32 scale;
@@ -85,6 +90,42 @@ typedef struct {
     mesh_t *meshes;
     u32 indexCount;//required for drawing
 }Geometry;
+
+typedef struct {
+    const char *name;
+    char *spirv; //dynamic array
+    VkShaderStageFlagBits stage;
+
+    u32 localSizeX;
+    u32 localSizeY;
+    u32 localSizeZ;
+
+    b8 usesPushConstants;
+} shader_t;
+
+typedef struct {
+    f32 P00, P11, near, far;
+    f32 frustum[4];
+    mat4_t projection;
+    mat4_t view;
+    vec4_t lightPos;
+    u32 selected;
+    u32 drawCount;
+} globals_t;
+
+typedef struct {
+    VkDeviceAddress globalsAddress;
+    VkDeviceAddress meshAddress;
+    VkDeviceAddress drawCommandAddress;
+    VkDeviceAddress drawCommandCountAddress;
+    VkDeviceAddress drawDataAddress;
+} shader_data_t;
+
+typedef struct {
+    VkPipelineLayout pipelineLayout;
+    VkPipeline pipeline;
+    VkShaderModule shaderModule;
+} pipeline_t;
 
 typedef struct {
     VkInstance instance;
