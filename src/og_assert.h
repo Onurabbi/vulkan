@@ -1,6 +1,6 @@
 
-#ifndef ASSERT_H
-#define ASSERT_H
+#ifndef OG_ASSERT_H
+#define OG_ASSERT_H
 
 #include "common.h"
 

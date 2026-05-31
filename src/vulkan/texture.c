@@ -1,12 +1,13 @@
 #include "../common.h"
 #include "texture.h"
 #include "volk.h"
+#include "vma.h"
 
 #include <string.h>
 #include <ktx.h>
 #include <ktxvulkan.h>
 
-b8 CreateTexture(Texture *texture, VkDescriptorImageInfo *imageInfo, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path)
+b8 CreateTexture(texture_t *texture, VkDescriptorImageInfo *imageInfo, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path)
 {
     ktxTexture *ktxTex = NULL;
     KTX_error_code err = ktxTexture_CreateFromNamedFile(path, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTex);
@@ -141,7 +142,7 @@ b8 CreateTexture(Texture *texture, VkDescriptorImageInfo *imageInfo, buffer_t *s
     return true;
 }
 
-void DestroyTexture(Texture *texture, VmaAllocator allocator, VkDevice device)
+void DestroyTexture(texture_t *texture, VmaAllocator allocator, VkDevice device)
 {
     vkDestroySampler(device, texture->sampler, NULL);
     vkDestroyImageView(device, texture->view, NULL);

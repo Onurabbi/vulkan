@@ -17,8 +17,12 @@ void main(uint3 id : SV_DispatchThreadId)
     }
 
     DrawData meshDraw = drawData[id.x];
-#if 0    
+#if 1  
     Mesh mesh = meshes[meshDraw.meshIndex];
+    float3 center = mesh.center;
+    float radius = mesh.radius;
+    uint32_t vertexCount = mesh.vertexCount;
+    uint32_t vertexOffset = mesh.vertexOffset;
 #else
     float3 center = float3(0.0f, 0.0f, 0.0f);
     float radius = 1.0f;

@@ -3,9 +3,13 @@
 #include "buffer.h"
 #include "texture.h"
 #include "vma.h"
+#include "volk.h"
+#include "vulkan_types.h"
+
 #include "../platform.h"
 #include "../common.h"
 #include "../log.h"
+#include "../limits.h"
 
 #include <stdio.h>
 #include <SDL3/SDL.h>
@@ -20,6 +24,10 @@
 #define FAST_OBJ_IMPLEMENTATION
 #include "fast_obj.h"
 
+#define CGLTF_IMPLEMENTATION
+#include "cgltf.h"
+
+static vulkan_context_t *gCtx;
 
 void AppendMesh(Geometry *geom, Vertex *vertices, u32 *indices, u32 textureIndex)
 {
@@ -162,7 +170,7 @@ b8 LoadObj(Vertex **ppVertices, const char *path, memory_arena_t *arena)
     return true;
 }
 
-b8 LoadMesh(Geometry *geom, const char *path, memory_arena_t *arena, u32 textureIndex)
+static b8 LoadMesh(Geometry *geom, const char *path, memory_arena_t *arena, u32 textureIndex)
 {
     Vertex *vertices = NULL;
     if (!LoadObj(&vertices, path, arena)) {
@@ -197,74 +205,74 @@ static void GeomLoadFunc(void *data, memory_arena_t *arena)
     }
 }
 
-void VulkanShutdown(vulkan_context_t *ctx)
+void VulkanShutdown(void)
 {
-    VK_CHECK(vkDeviceWaitIdle(ctx->device));
+    VK_CHECK(vkDeviceWaitIdle(gCtx->device));
 
-    for (u32 i = 0; i < ARRAY_SIZE(ctx->textures); i++) {
-        DestroyTexture(&ctx->textures[i], ctx->allocator, ctx->device);
+    for (u32 i = 0; i < ARRAY_SIZE(gCtx->textures); i++) {
+        DestroyTexture(&gCtx->textures[i], gCtx->allocator, gCtx->device);
     }
 
-    DestroyGraphicsPipeline(&ctx->pipeline, ctx->device);
-    DestroyComputePipeline(&ctx->computePipeline, ctx->device);
+    DestroyGraphicsPipeline(&gCtx->pipeline, gCtx->device);
+    DestroyComputePipeline(&gCtx->computePipeline, gCtx->device);
 
-    vkDestroyDescriptorSetLayout(ctx->device, ctx->texLayout, NULL);
-    vkDestroyDescriptorPool(ctx->device, ctx->descriptorPool, NULL);
-    vkDestroyCommandPool(ctx->device, ctx->commandPool, NULL);
+    vkDestroyDescriptorSetLayout(gCtx->device, gCtx->texLayout, NULL);
+    vkDestroyDescriptorPool(gCtx->device, gCtx->descriptorPool, NULL);
+    vkDestroyCommandPool(gCtx->device, gCtx->commandPool, NULL);
 
-    DestroyBuffer(&ctx->scratchBuffer, ctx->allocator);
-    DestroyBuffer(&ctx->drawCommandCountBuffer, ctx->allocator);
+    DestroyBuffer(&gCtx->scratchBuffer, gCtx->allocator);
+    DestroyBuffer(&gCtx->drawCommandCountBuffer, gCtx->allocator);
 
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        DestroyBuffer(&ctx->shaderGlobalsBuffers[i], ctx->allocator);
-        DestroyBuffer(&ctx->drawCommandBuffers[i], ctx->allocator);
+        DestroyBuffer(&gCtx->shaderGlobalsBuffers[i], gCtx->allocator);
+        DestroyBuffer(&gCtx->drawCommandBuffers[i], gCtx->allocator);
     }
 
-    DestroyBuffer(&ctx->vertexBuffer, ctx->allocator);
-    DestroyBuffer(&ctx->indexBuffer, ctx->allocator);
-    DestroyBuffer(&ctx->drawBuffer, ctx->allocator);
-    DestroyBuffer(&ctx->meshBuffer, ctx->allocator);
+    DestroyBuffer(&gCtx->vertexBuffer, gCtx->allocator);
+    DestroyBuffer(&gCtx->indexBuffer, gCtx->allocator);
+    DestroyBuffer(&gCtx->drawBuffer, gCtx->allocator);
+    DestroyBuffer(&gCtx->meshBuffer, gCtx->allocator);
 
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vkDestroyFence(ctx->device, ctx->fences[i], NULL);
-        vkDestroySemaphore(ctx->device, ctx->presentSemaphores[i], NULL);
+        vkDestroyFence(gCtx->device, gCtx->fences[i], NULL);
+        vkDestroySemaphore(gCtx->device, gCtx->presentSemaphores[i], NULL);
     }
 
     for (u32 i = 0; i < MAX_SWAPCHAIN_IMAGES; i++) {
-        vkDestroyImageView(ctx->device, ctx->swapchainImages[i].view, NULL);
-        vkDestroySemaphore(ctx->device, ctx->renderSemaphores[i], NULL);
+        vkDestroyImageView(gCtx->device, gCtx->swapchainImages[i].view, NULL);
+        vkDestroySemaphore(gCtx->device, gCtx->renderSemaphores[i], NULL);
     }
 
-    vkDestroyImageView(ctx->device, ctx->depthImage.view, NULL);
-    vmaDestroyImage(ctx->allocator, ctx->depthImage.image, ctx->depthImage.allocation);
+    vkDestroyImageView(gCtx->device, gCtx->depthImage.view, NULL);
+    vmaDestroyImage(gCtx->allocator, gCtx->depthImage.image, gCtx->depthImage.allocation);
 
-    vkDestroySwapchainKHR(ctx->device, ctx->swapchain, NULL);
-    SDL_Vulkan_DestroySurface(ctx->instance, ctx->window.surface, NULL);
-    SDL_DestroyWindow(ctx->window.window);
+    vkDestroySwapchainKHR(gCtx->device, gCtx->swapchain, NULL);
+    SDL_Vulkan_DestroySurface(gCtx->instance, gCtx->window.surface, NULL);
+    SDL_DestroyWindow(gCtx->window.window);
 
-    vmaDestroyAllocator(ctx->allocator);
+    vmaDestroyAllocator(gCtx->allocator);
 
-    vkDestroyDevice(ctx->device, NULL);
-    vkDestroyInstance(ctx->instance, NULL);
+    vkDestroyDevice(gCtx->device, NULL);
+    vkDestroyInstance(gCtx->instance, NULL);
 
     volkFinalize();
 }
 
-void VulkanRender(vulkan_context_t *ctx)
+void VulkanRender(void)
 {
     float cameraZ = 6.0f;
 
-    VK_CHECK(vkWaitForFences(ctx->device, 1, &ctx->fences[ctx->frameIndex], true, UINT64_MAX));
-    VK_CHECK(vkResetFences(ctx->device, 1, &ctx->fences[ctx->frameIndex]));
+    VK_CHECK(vkWaitForFences(gCtx->device, 1, &gCtx->fences[gCtx->frameIndex], true, UINT64_MAX));
+    VK_CHECK(vkResetFences(gCtx->device, 1, &gCtx->fences[gCtx->frameIndex]));
 
     u32 imageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(ctx->device, ctx->swapchain, UINT64_MAX, ctx->presentSemaphores[ctx->frameIndex], VK_NULL_HANDLE, &imageIndex));
+    VK_CHECK(vkAcquireNextImageKHR(gCtx->device, gCtx->swapchain, UINT64_MAX, gCtx->presentSemaphores[gCtx->frameIndex], VK_NULL_HANDLE, &imageIndex));
     
     f32 znear = 0.1f;
     f32 zfar = 256.0f;
 
     globals_t globals = {0};
-    globals.projection = HMM_Perspective_LH_ZO(HMM_AngleDeg(60.0f), (f32)ctx->window.w / (f32)ctx->window.h, znear, zfar);
+    globals.projection = HMM_Perspective_LH_ZO(HMM_AngleDeg(60.0f), (f32)gCtx->window.w / (f32)gCtx->window.h, znear, zfar);
     globals.view = HMM_LookAt_LH((vec3_t){0.0f, 0.0f, cameraZ}, (vec3_t){0.0f, 0.0f, 0.0f}, (vec3_t){0.0f, -1.0f, 0.0f});
 
     mat4_t projectionT = HMM_TransposeM4(globals.projection);
@@ -279,11 +287,11 @@ void VulkanRender(vulkan_context_t *ctx)
     globals.frustum[1] = frustumX.Z;
     globals.frustum[2] = frustumY.Y;
     globals.frustum[3] = frustumY.Z;
-    globals.drawCount = ctx->drawCount;
+    globals.drawCount = gCtx->drawCount;
 
-    UploadBuffer(&ctx->shaderGlobalsBuffers[ctx->frameIndex], &globals, sizeof(globals_t), 0);
+    UploadBuffer(&gCtx->shaderGlobalsBuffers[gCtx->frameIndex], &globals, sizeof(globals_t), 0);
 
-    VkCommandBuffer cb = ctx->commandBuffers[ctx->frameIndex];
+    VkCommandBuffer cb = gCtx->commandBuffers[gCtx->frameIndex];
 
     VK_CHECK(vkResetCommandBuffer(cb, 0));
 
@@ -300,7 +308,7 @@ void VulkanRender(vulkan_context_t *ctx)
         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
     );
 
-    vkCmdFillBuffer(cb, ctx->drawCommandCountBuffer.buffer, 0, sizeof(u32), 0);
+    vkCmdFillBuffer(cb, gCtx->drawCommandCountBuffer.buffer, 0, sizeof(u32), 0);
 
     StageBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_ACCESS_2_MEMORY_WRITE_BIT, 
@@ -309,7 +317,7 @@ void VulkanRender(vulkan_context_t *ctx)
     );
 
     //color and depth image need barriers for layout transitions
-    VkImageMemoryBarrier2 colorBarrier = ImageBarrier(ctx->swapchainImages[imageIndex].image,
+    VkImageMemoryBarrier2 colorBarrier = ImageBarrier(gCtx->swapchainImages[imageIndex].image,
         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         0,
         VK_IMAGE_LAYOUT_UNDEFINED,
@@ -319,7 +327,7 @@ void VulkanRender(vulkan_context_t *ctx)
         VK_IMAGE_ASPECT_COLOR_BIT,
         0, 1);
     
-    VkImageMemoryBarrier2 depthBarrier = ImageBarrier(ctx->depthImage.image,
+    VkImageMemoryBarrier2 depthBarrier = ImageBarrier(gCtx->depthImage.image,
         VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
         VK_IMAGE_LAYOUT_UNDEFINED,
@@ -342,7 +350,7 @@ void VulkanRender(vulkan_context_t *ctx)
 
     VkRenderingAttachmentInfo colorAttachmentInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = ctx->swapchainImages[imageIndex].view,
+        .imageView = gCtx->swapchainImages[imageIndex].view,
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -351,7 +359,7 @@ void VulkanRender(vulkan_context_t *ctx)
 
     VkRenderingAttachmentInfo depthAttachmentInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = ctx->depthImage.view,
+        .imageView = gCtx->depthImage.view,
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -360,8 +368,8 @@ void VulkanRender(vulkan_context_t *ctx)
 
     VkRenderingInfo renderingInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea.extent.width = ctx->window.w,
-        .renderArea.extent.height = ctx->window.h,
+        .renderArea.extent.width = gCtx->window.w,
+        .renderArea.extent.height = gCtx->window.h,
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachmentInfo,
@@ -369,9 +377,9 @@ void VulkanRender(vulkan_context_t *ctx)
     };
 
     //dispatch compute shader here
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, ctx->computePipeline.pipeline);
-    vkCmdPushConstants(cb, ctx->computePipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader_data_t), &ctx->shaderData[ctx->frameIndex]);
-    u32 numWorkgroups = (ctx->drawCount + 63) / 64;
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, gCtx->computePipeline.pipeline);
+    vkCmdPushConstants(cb, gCtx->computePipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
+    u32 numWorkgroups = (gCtx->drawCount + 63) / 64;
     vkCmdDispatch(cb, numWorkgroups, 1, 1);
     
     // Synchronize compute shader write with draw indirect read
@@ -383,29 +391,29 @@ void VulkanRender(vulkan_context_t *ctx)
     vkCmdBeginRendering(cb, &renderingInfo);
 
     VkViewport vp = {
-        .width = (f32)ctx->window.w,
-        .height = (f32)ctx->window.h,
+        .width = (f32)gCtx->window.w,
+        .height = (f32)gCtx->window.h,
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
 
     vkCmdSetViewport(cb, 0, 1, &vp);
     VkRect2D scissor = {
-        .extent.width =  ctx->window.w,
-        .extent.height = ctx->window.h,
+        .extent.width =  gCtx->window.w,
+        .extent.height = gCtx->window.h,
     };
 
     vkCmdSetScissor(cb, 0, 1, &scissor);
 
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx->pipeline.pipeline);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx->pipeline.pipelineLayout, 0, 1, &ctx->descriptorSetTex, 0, NULL);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetTex, 0, NULL);
 
     VkDeviceSize vOffset = 0;        
-    vkCmdBindVertexBuffers(cb, 0, 1, &ctx->vertexBuffer.buffer, &vOffset);
-    vkCmdBindIndexBuffer(cb, ctx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdPushConstants(cb, ctx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(shader_data_t), &ctx->shaderData[ctx->frameIndex]);
+    vkCmdBindVertexBuffers(cb, 0, 1, &gCtx->vertexBuffer.buffer, &vOffset);
+    vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
 
-    vkCmdDrawIndexedIndirectCount(cb, ctx->drawCommandBuffers[ctx->frameIndex].buffer, offsetof(draw_command_t, command), ctx->drawCommandCountBuffer.buffer, 0, ctx->drawCount, sizeof(draw_command_t));
+    vkCmdDrawIndexedIndirectCount(cb, gCtx->drawCommandBuffers[gCtx->frameIndex].buffer, offsetof(draw_command_t, command), gCtx->drawCommandCountBuffer.buffer, 0, gCtx->drawCount, sizeof(draw_command_t));
     vkCmdEndRendering(cb);
 
     VkImageMemoryBarrier2 barrierPresent = {
@@ -416,7 +424,7 @@ void VulkanRender(vulkan_context_t *ctx)
         .dstAccessMask = 0,
         .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image = ctx->swapchainImages[imageIndex].image,
+        .image = gCtx->swapchainImages[imageIndex].image,
         .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, 
         .subresourceRange.levelCount = 1, 
         .subresourceRange.layerCount = 1,
@@ -435,83 +443,84 @@ void VulkanRender(vulkan_context_t *ctx)
     VkSubmitInfo submitInfo = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &ctx->presentSemaphores[ctx->frameIndex],
+        .pWaitSemaphores = &gCtx->presentSemaphores[gCtx->frameIndex],
         .pWaitDstStageMask = &waitStages,
         .commandBufferCount = 1,
         .pCommandBuffers = &cb,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &ctx->renderSemaphores[imageIndex],
+        .pSignalSemaphores = &gCtx->renderSemaphores[imageIndex],
     };
 
-    VK_CHECK(vkQueueSubmit(ctx->queue, 1, &submitInfo, ctx->fences[ctx->frameIndex]));
+    VK_CHECK(vkQueueSubmit(gCtx->queue, 1, &submitInfo, gCtx->fences[gCtx->frameIndex]));
 
-    ctx->frameIndex = (ctx->frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+    gCtx->frameIndex = (gCtx->frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
 
     VkPresentInfoKHR presentInfo = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &ctx->renderSemaphores[imageIndex],
+        .pWaitSemaphores = &gCtx->renderSemaphores[imageIndex],
         .swapchainCount = 1,
-        .pSwapchains = &ctx->swapchain,
+        .pSwapchains = &gCtx->swapchain,
         .pImageIndices = &imageIndex,
     };
 
-    VK_CHECK(vkQueuePresentKHR(ctx->queue, &presentInfo));
+    VK_CHECK(vkQueuePresentKHR(gCtx->queue, &presentInfo));
 
-    if (ctx->windowResized) {
-        if (SDL_GetWindowSize(ctx->window.window, &ctx->window.w, &ctx->window.h)) {
-            printf("Window resized: %ux%u\n", ctx->window.w, ctx->window.h);
+    if (gCtx->windowResized) {
+        if (SDL_GetWindowSize(gCtx->window.window, &gCtx->window.w, &gCtx->window.h)) {
+            printf("Window resized: %ux%u\n", gCtx->window.w, gCtx->window.h);
         }
-        ctx->windowResized = false;
+        gCtx->windowResized = false;
 
-        VK_CHECK(vkDeviceWaitIdle(ctx->device));
+        VK_CHECK(vkDeviceWaitIdle(gCtx->device));
     
         VkSurfaceCapabilitiesKHR surfaceCaps;
-        VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->physicalDevice, ctx->window.surface, &surfaceCaps));
+        VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gCtx->physicalDevice, gCtx->window.surface, &surfaceCaps));
 
         VkSwapchainCreateInfoKHR swapchainCI = {
             .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-            .surface = ctx->window.surface,
+            .surface = gCtx->window.surface,
             .minImageCount = surfaceCaps.minImageCount,
-            .imageFormat = ctx->swapchainImages[0].format,
+            .imageFormat = gCtx->swapchainImages[0].format,
             .imageColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR,
-            .imageExtent.width = ctx->window.w,
-            .imageExtent.height = ctx->window.h,
+            .imageExtent.width = gCtx->window.w,
+            .imageExtent.height = gCtx->window.h,
             .imageArrayLayers = 1,
             .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
             .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = VK_PRESENT_MODE_FIFO_KHR,
-            .oldSwapchain = ctx->swapchain,
+            .oldSwapchain = gCtx->swapchain,
         };
 
-        VK_CHECK(vkCreateSwapchainKHR(ctx->device, &swapchainCI, NULL, &ctx->swapchain));
+        VK_CHECK(vkCreateSwapchainKHR(gCtx->device, &swapchainCI, NULL, &gCtx->swapchain));
 
-        for (u32 i = 0; i < ctx->swapchainImageCount; i++) {
-            vkDestroyImageView(ctx->device, ctx->swapchainImages[i].view, NULL);
+        for (u32 i = 0; i < gCtx->swapchainImageCount; i++) {
+            vkDestroyImageView(gCtx->device, gCtx->swapchainImages[i].view, NULL);
         }
 
         VkImage images[MAX_SWAPCHAIN_IMAGES];
-        VK_CHECK(vkGetSwapchainImagesKHR(ctx->device, ctx->swapchain, &ctx->swapchainImageCount, images));
-        LV_ASSERT(ctx->swapchainImageCount <= MAX_SWAPCHAIN_IMAGES);
+        VK_CHECK(vkGetSwapchainImagesKHR(gCtx->device, gCtx->swapchain, &gCtx->swapchainImageCount, images));
+        LV_ASSERT(gCtx->swapchainImageCount <= MAX_SWAPCHAIN_IMAGES);
 
-        VkFormat format = ctx->swapchainImages[0].format;
-        for (u32 i = 0; i < ctx->swapchainImageCount; i++) {
-            ctx->swapchainImages[i].image = images[i];
-            ctx->swapchainImages[i].view = CreateImageView(ctx->device, images[i], format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+        VkFormat format = gCtx->swapchainImages[0].format;
+        for (u32 i = 0; i < gCtx->swapchainImageCount; i++) {
+            gCtx->swapchainImages[i].image = images[i];
+            gCtx->swapchainImages[i].view = CreateImageView(gCtx->device, images[i], format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
         }
 
-        vkDestroySwapchainKHR(ctx->device, swapchainCI.oldSwapchain, NULL);
-        vmaDestroyImage(ctx->allocator, ctx->depthImage.image, ctx->depthImage.allocation);
-        vkDestroyImageView(ctx->device, ctx->depthImage.view, NULL);
+        vkDestroySwapchainKHR(gCtx->device, swapchainCI.oldSwapchain, NULL);
+        vmaDestroyImage(gCtx->allocator, gCtx->depthImage.image, gCtx->depthImage.allocation);
+        vkDestroyImageView(gCtx->device, gCtx->depthImage.view, NULL);
 
-        ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, ctx->depthImage.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, ctx->window.w, ctx->window.h, 1, &ctx->depthImage.allocation);
-        ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, ctx->depthImage.format, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+        gCtx->depthImage.image = CreateImage(gCtx->device, gCtx->allocator, gCtx->depthImage.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, gCtx->window.w, gCtx->window.h, 1, &gCtx->depthImage.allocation);
+        gCtx->depthImage.view = CreateImageView(gCtx->device, gCtx->depthImage.image, gCtx->depthImage.format, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
     }
 }
 
 void VulkanHotReload(vulkan_context_t *ctx)
 {
+    gCtx = ctx;
     //reinitialize volk
     if (volkInitialize() != VK_SUCCESS) {
         LOGF("Unable to initialize volk");
@@ -521,7 +530,7 @@ void VulkanHotReload(vulkan_context_t *ctx)
     volkLoadDevice(ctx->device);
 }
 
-void VulkanInit(vulkan_context_t *ctx, platform_api_t *api, string_interning_system_t *stringInterning)
+void VulkanInit(vulkan_context_t *ctx)
 {
     int rc = system("ninja compile_shaders");
     if (rc != 0) {
@@ -544,10 +553,10 @@ void VulkanInit(vulkan_context_t *ctx, platform_api_t *api, string_interning_sys
 
     VkInstanceCreateInfo instanceCI = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .enabledExtensionCount = api->vulkanInstanceExtensionCount,
+        .enabledExtensionCount = PlatformGetVulkanInstanceExtensionCount(),
         .enabledLayerCount = 1,
         .ppEnabledLayerNames = &validationLayerName,
-        .ppEnabledExtensionNames = api->vulkanInstanceExtensions,
+        .ppEnabledExtensionNames = PlatformGetVulkanInstanceExtensions(),
         .pApplicationInfo = &appInfo
     };
 
@@ -585,7 +594,7 @@ void VulkanInit(vulkan_context_t *ctx, platform_api_t *api, string_interning_sys
         }  
     }
 
-    if (!api->VulkanGetPresentationSupport(ctx->instance, ctx->physicalDevice, ctx->queueFamily)) {
+    if (!PlatformGetVulkanPresentationSupport(ctx->instance, ctx->physicalDevice, ctx->queueFamily)) {
         LOGF("Selected queue family does not support presentation");
         return;
     }
@@ -663,7 +672,7 @@ void VulkanInit(vulkan_context_t *ctx, platform_api_t *api, string_interning_sys
     VK_CHECK(vmaImportVulkanFunctionsFromVolk(&allocatorCI, &vkFunctions));
     VK_CHECK(vmaCreateAllocator(&allocatorCI, &ctx->allocator));
 
-    if (!api->CreateWindow(&ctx->window, ctx->instance, "HowToVulkan", 1280U, 720U, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE)) {
+    if (!PlatformCreateWindow(&ctx->window, ctx->instance, "HowToVulkan", 1280U, 720U, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE)) {
         LOGF("Unable to create window");
         return;
     }
@@ -734,14 +743,15 @@ void VulkanInit(vulkan_context_t *ctx, platform_api_t *api, string_interning_sys
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;
 
+    material_t *materials = NULL;
+    draw_data_t *drawData = NULL;
+    const char *texturePaths;
+
     //launch job to load geometry
     PushJob(GeomLoadFunc, &ctx->geometry);
 
     shader_t *shaders = NULL;
-    resource_loader_t loader = {};
-    loader.stringInterning = stringInterning;
-    loader.loadedData = &shaders;
-    PushJob(LoadShaders, &loader);
+    PushJob(LoadShaders, &shaders);
     WaitForAllJobs();
 
     VkDeviceSize vBufSize = sizeof(Vertex) * ArrayCount(ctx->geometry.vertices);
@@ -934,8 +944,8 @@ void VulkanInit(vulkan_context_t *ctx, platform_api_t *api, string_interning_sys
 
     ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, ARRAY_SIZE(ctx->textures));
 
-    CreateGraphicsPipeline(&ctx->pipeline, stringInterning, shaders, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(shader_data_t), ctx->texLayout);
-    CreateComputePipeline(&ctx->computePipeline, stringInterning, shaders, ctx->device, "compute_shader.spv", sizeof(shader_data_t));
+    CreateGraphicsPipeline(&ctx->pipeline, shaders, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(shader_data_t), ctx->texLayout);
+    CreateComputePipeline(&ctx->computePipeline, shaders, ctx->device, "compute_shader.spv", sizeof(shader_data_t));
 
     u32 variableDescCount = ARRAY_SIZE(ctx->textures);
     VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {
@@ -964,5 +974,7 @@ void VulkanInit(vulkan_context_t *ctx, platform_api_t *api, string_interning_sys
     };
 
     vkUpdateDescriptorSets(ctx->device, 1, &writeDescSet, 0, NULL);
+
+    gCtx = ctx;
 }
 

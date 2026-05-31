@@ -1,0 +1,130 @@
+#ifndef OG_VULKAN_TYPES_H
+#define OG_VULKAN_TYPES_H
+
+#include "../common.h"
+#include "../limits.h"
+
+#ifndef VULKAN_H_
+#include <vulkan/vk_platform.h>
+#include <vulkan/vulkan_core.h>
+#endif
+
+#ifndef AMD_VULKAN_MEMORY_ALLOCATOR_H
+#include "vma.h"
+#endif
+
+typedef enum VkFormat VkFormat;
+typedef enum VmaMemoryUsage VmaMemoryUsage;
+typedef u32 VmaAllocationFlags;
+
+typedef struct SDL_Window SDL_Window;
+
+typedef struct {
+    VmaAllocation allocation;
+    VkImage image;
+    VkImageView view;
+    VkSampler sampler;
+}texture_t;
+
+typedef struct {
+    VkImage image;
+    VkImageView view;
+    VkFormat format;
+    VmaAllocation allocation;
+} image_t;
+
+typedef struct {
+    VmaAllocation allocation;
+    VmaAllocationInfo allocInfo;
+    VkBuffer buffer;
+    VkDeviceAddress deviceAddress;
+    VkDeviceSize size;
+} buffer_t;
+
+typedef struct {
+    SDL_Window *window;
+    VkSurfaceKHR surface;
+    i32 w,h;
+} vulkan_window_t;
+
+typedef struct {
+    u32 albedo;
+    u32 normal;
+    u32 specular;
+    u32 emissive;
+    vec4_t diffuseFactor;
+    vec4_t specularFactor;
+    vec3_t emissiveFactor;
+    
+    u32 padding;
+} material_t;
+
+typedef struct {
+    vec3_t center;
+    f32 radius;
+    u32 vertexOffset;
+    u32 vertexCount;
+    u32 textureIndex;
+} mesh_t;
+
+typedef struct {
+    f32 rx,ry,rz,rw; //because quat_t forces 16 byte alignment
+    vec3_t position;
+    f32 scale;
+    u32 meshIndex;
+} draw_data_t;
+
+typedef struct {
+    u32 drawId;
+    VkDrawIndexedIndirectCommand command;
+}draw_command_t;
+
+typedef struct {
+    Vertex *vertices;
+    u32 *indices;
+    mesh_t *meshes;
+    u32 indexCount;//required for drawing
+}Geometry;
+
+typedef struct {
+    VkInstance instance;
+    VkDevice device;
+    VkPhysicalDevice physicalDevice;
+    vulkan_window_t  window;
+    VkSwapchainKHR swapchain;
+    image_t swapchainImages[MAX_SWAPCHAIN_IMAGES];
+    image_t depthImage;
+    u32 swapchainImageCount;
+    u32 queueFamily;
+    VkQueue queue;
+    buffer_t vertexBuffer;
+    buffer_t indexBuffer;
+    buffer_t shaderGlobalsBuffers[MAX_FRAMES_IN_FLIGHT];
+    buffer_t drawBuffer;
+    buffer_t meshBuffer;
+    buffer_t drawCommandBuffers[MAX_FRAMES_IN_FLIGHT];
+    buffer_t drawCommandCountBuffer;
+    buffer_t scratchBuffer;
+    VmaAllocator allocator;
+    texture_t textures[3];
+    VkDescriptorImageInfo textureDescriptors[3];
+    VkDescriptorSetLayout texLayout;
+    VkDescriptorPool descriptorPool;
+    VkDescriptorSet descriptorSetTex;
+    VkFence fences[MAX_FRAMES_IN_FLIGHT];
+    VkSemaphore presentSemaphores[MAX_FRAMES_IN_FLIGHT];//max frames in flight
+    VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES]; //swapchain image count
+    VkCommandPool commandPool;
+    VkCommandBuffer commandBuffers[MAX_FRAMES_IN_FLIGHT];//max frames in flight
+    shader_data_t shaderData[3];
+    Geometry geometry;
+    //static compute_data_t gComputeData;
+    pipeline_t pipeline;
+    pipeline_t computePipeline;
+    f32 cameraZ;
+    u32 frameIndex;
+    b8 windowResized;
+    u32 drawCount;
+} vulkan_context_t;
+
+#endif

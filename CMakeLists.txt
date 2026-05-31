@@ -28,4 +28,5 @@ if (UNIX)
 endif()
 
 add_executable(Robust main.c src/log.c)
+target_compile_definitions(Robust PRIVATE RENDERER_VULKAN)
 target_link_libraries(Robust PRIVATE SDL3::SDL3)

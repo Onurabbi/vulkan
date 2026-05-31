@@ -1,5 +1,5 @@
-#ifndef STRING_INTERN_H
-#define STRING_INTERN_H
+#ifndef OG_STRING_INTERN_H
+#define OG_STRING_INTERN_H
 
 #include "memory.h"
 #include "og_ds.h"
@@ -9,9 +9,10 @@ typedef struct {
     hash_map_t      map;
 }string_interning_system_t;
 
-const char *StringIntern(string_interning_system_t *system, const char *str);
+const char *StringIntern(const char *str);
 void StringInterningInit(string_interning_system_t *system);
-void StringInterningDeinit(string_interning_system_t *system);
+void StringInterningHotReload(string_interning_system_t *system);
+void StringInterningDeinit(void);
 
 #endif
 

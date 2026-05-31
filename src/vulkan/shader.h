@@ -8,12 +8,6 @@
 
 #include <HandmadeMath.h>
 
-typedef HMM_Vec2 vec2_t;
-typedef HMM_Vec3 vec3_t;
-typedef HMM_Vec4 vec4_t;
-typedef HMM_Mat4 mat4_t;
-typedef HMM_Quat quat_t;
-
 typedef struct {
     vec3_t p;
     vec3_t n;
@@ -56,17 +50,12 @@ typedef struct {
     VkShaderModule shaderModule;
 } pipeline_t;
 
-typedef struct {
-    string_interning_system_t *stringInterning;
-    void *loadedData;
-}resource_loader_t;
-
 void LoadShaders(void *data, memory_arena_t *arena);
 
-void CreateGraphicsPipeline(pipeline_t *pipeline, string_interning_system_t *stringInterning, const shader_t *shaders, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout);
+void CreateGraphicsPipeline(pipeline_t *pipeline, const shader_t *shaders, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout);
 void DestroyGraphicsPipeline(pipeline_t *pipeline, VkDevice device);
 
-void CreateComputePipeline(pipeline_t *pipeline, string_interning_system_t* stringInterning, shader_t *shaders, VkDevice device, const char *name, u32 pushConstantSize);
+void CreateComputePipeline(pipeline_t *pipeline, shader_t *shaders, VkDevice device, const char *name, u32 pushConstantSize);
 void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device);
 VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount);
 #endif // VK_SHADER_H

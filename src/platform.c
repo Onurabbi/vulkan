@@ -4,17 +4,37 @@
 
 static platform_api_t *platformApi;
 
-void InitPlatformApi(platform_api_t *api)
+void PlatformInit(platform_api_t *api)
 {
     platformApi = api;
 }
 
-b8 VulkanGetPresentationSupport(vulkan_instance_t instance, vulkan_physical_device_t physicalDevice, u32 queue)
+void PlatformShutdown(void)
+{
+    platformApi = NULL;
+}
+
+void PlatformHotReload(platform_api_t *api)
+{
+    platformApi = api;
+}
+
+b8 PlatformGetVulkanPresentationSupport(vulkan_instance_t instance, vulkan_physical_device_t physicalDevice, u32 queue)
 {
     return platformApi->VulkanGetPresentationSupport(instance, physicalDevice, queue);
 }
 
-b8 CreateWindow(void* window, void *arg, const char *title, i32 w, i32 h, u64 flags)
+u32 PlatformGetVulkanInstanceExtensionCount(void)
+{
+    return platformApi->vulkanInstanceExtensionCount;
+}
+
+const char * const *PlatformGetVulkanInstanceExtensions(void)
+{
+    return platformApi->vulkanInstanceExtensions;
+}
+
+b8 PlatformCreateWindow(void* window, void *arg, const char *title, i32 w, i32 h, u64 flags)
 {
     return platformApi->CreateWindow(window, arg, title, w, h, flags);
 }
@@ -67,4 +87,9 @@ const char *ArenaPrintf(memory_arena_t *arena, const char *fmt, ...)
     const char *result = platformApi->ArenaPrintf(arena, fmt, args);
     va_end(args);
     return result;
+}
+
+renderer_type_t GetRendererType(void)
+{
+    return platformApi->rendererType;
 }

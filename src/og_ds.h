@@ -2,6 +2,7 @@
 #define OG_DS_H
 
 #include "common.h"
+#include "limits.h"
 
 #include <stdlib.h>
 #include <string.h>

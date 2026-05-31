@@ -11,7 +11,8 @@
 LV_EXPORT void HotReload(game_memory_t *gameMemory)
 {
     game_state_t *gameState = (game_state_t *)gameMemory->gameState;
-    InitPlatformApi(&gameMemory->api);
+    PlatformHotReload(&gameMemory->api);
+    StringInterningHotReload(&gameState->stringInterning);
     RendererHotReload(&gameState->renderer);
 }
 
@@ -19,10 +20,10 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
 {
     game_state_t *gameState = gameMemory->gameState;
     if (!gameState || !gameState->isInitialized) {
-        InitPlatformApi(&gameMemory->api);
+        PlatformInit(&gameMemory->api);
         gameState = PushStruct(PermanentArena(), game_state_t);
         StringInterningInit(&gameState->stringInterning);
-        RendererInit(&gameState->renderer, &gameMemory->api, &gameState->stringInterning);
+        RendererInit(&gameState->renderer);
 
         gameState->isInitialized = true;
         gameMemory->gameState = gameState;
@@ -47,12 +48,13 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
 LV_EXPORT void Render(game_memory_t *gameMemory)
 {
     game_state_t *gameState = (game_state_t *)gameMemory->gameState;
-    RendererRender(&gameState->renderer);
+    RendererRender();
 }
 
 LV_EXPORT void Shutdown(game_memory_t *gameMemory)
 {
     game_state_t *gameState = (game_state_t *)gameMemory->gameState;
-    RendererShutdown(&gameState->renderer);
-    StringInterningDeinit(&gameState->stringInterning);
+    RendererShutdown();
+    StringInterningDeinit();
+    PlatformShutdown();
 }

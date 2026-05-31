@@ -1,7 +1,8 @@
 #include "src/common.h"
+#include "src/limits.h"
+
 #include "volk.h"
 #include "src/log.h"
-
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
@@ -376,7 +377,9 @@ int main(int argc, char *argv[])
     gameMemory->api.PermanentArena = PermanentArena;
     gameMemory->api.ScratchArena = ScratchArena;
     gameMemory->api.StringArena = StringArena;
-
+#if defined (RENDERER_VULKAN)
+    gameMemory->api.rendererType = RENDERER_TYPE_VULKAN;
+#endif
     //Init threads
     mutex = SDL_CreateMutex();
     if (!mutex) {

@@ -202,8 +202,6 @@ static b8 LoadShader(shader_t *shader, const char *path, memory_arena_t *arena)
 
 void LoadShaders(void *data, memory_arena_t *arena)
 {
-    resource_loader_t *loader = (resource_loader_t *)data;
-
     shader_t *result = NULL;
     const char *basePath = SDL_GetBasePath();
 
@@ -219,7 +217,7 @@ void LoadShaders(void *data, memory_arena_t *arena)
 
     for (u32 i = 0; i < spvCount; i++) {
         shader_t shader = {0};
-        shader.name = StringIntern(loader->stringInterning, glob[i]);
+        shader.name = StringIntern(glob[i]);
 
         //basePath is guaranteed to end with a slash, so we don't need to add an extra one here.
         const char *shaderPath = ArenaPrintf(arena, "%s%s", fullPath, glob[i]);
@@ -233,7 +231,7 @@ void LoadShaders(void *data, memory_arena_t *arena)
 
     SDL_free(glob);
 
-    *(shader_t**)loader->loadedData = result;
+    *(shader_t**)data = result;
 }
 
 VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount)
@@ -275,10 +273,10 @@ void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device)
     DestroyGraphicsPipeline(pipeline, device);
 }
 
-static const shader_t *FindShaderByName(string_interning_system_t *stringInterning, const shader_t *shaders, const char *name)
+static const shader_t *FindShaderByName(const shader_t *shaders, const char *name)
 {
     const shader_t *result = NULL;
-    const char *shaderName = StringIntern(stringInterning, name);
+    const char *shaderName = StringIntern(name);
     for (u32 i = 0; i < ArrayCount(shaders); i++) {
         if (shaders[i].name == shaderName) {
             result = &shaders[i];
@@ -288,9 +286,9 @@ static const shader_t *FindShaderByName(string_interning_system_t *stringInterni
     return result;
 }
 
-void CreateComputePipeline(pipeline_t *pipeline, string_interning_system_t* stringInterning, shader_t *shaders, VkDevice device, const char *name, u32 pushConstantSize) 
+void CreateComputePipeline(pipeline_t *pipeline, shader_t *shaders, VkDevice device, const char *name, u32 pushConstantSize) 
 {
-    const shader_t *shader = FindShaderByName(stringInterning, shaders, name);
+    const shader_t *shader = FindShaderByName(shaders, name);
     LV_ASSERT(shader && "Shader not found for pipeline creation");
     LV_ASSERT(shader->stage == VK_SHADER_STAGE_COMPUTE_BIT);
     
@@ -332,9 +330,9 @@ void CreateComputePipeline(pipeline_t *pipeline, string_interning_system_t* stri
     VK_CHECK(vkCreateComputePipelines(device, NULL, 1, &ci, 0, &pipeline->pipeline));
 }
 
-void CreateGraphicsPipeline(pipeline_t *pipeline, string_interning_system_t *stringInterning, const shader_t *shaders, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout)
+void CreateGraphicsPipeline(pipeline_t *pipeline, const shader_t *shaders, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout)
 {
-    const shader_t *shader = FindShaderByName(stringInterning, shaders, name);
+    const shader_t *shader = FindShaderByName(shaders, name);
     LV_ASSERT(shader && "Shader not found for pipeline creation");
 
     VkShaderModuleCreateInfo shaderModuleCI = {

@@ -1,43 +1,51 @@
 #include "renderer.h"
+#include "platform.h"
 #include "log.h"
 
-void RendererInit(renderer_t *renderer, platform_api_t *api, string_interning_system_t *stringInterning)
+static renderer_t *gRenderer;
+
+void RendererInit(renderer_t *renderer)
 {
+    renderer->type = GetRendererType();
     switch (renderer->type) {
-        case RENDERER_VULKAN:
-            VulkanInit(&renderer->vulkan, api, stringInterning);
+        case RENDERER_TYPE_VULKAN:
+            VulkanInit(&renderer->vulkan);
             break;
         default:
             LOGF("Unsupported renderer type");
     }
+    gRenderer = renderer;
 }
 
 void RendererHotReload(renderer_t *renderer)
 {
+    renderer->type = GetRendererType();
     switch (renderer->type) {
-        case RENDERER_VULKAN:
+        case RENDERER_TYPE_VULKAN:
             VulkanHotReload(&renderer->vulkan);
             break;
         default:
             LOGF("Unsupported renderer type");
     }
+    gRenderer = renderer;
 }
 
-void RendererShutdown(renderer_t *renderer)
+void RendererShutdown(void)
 {
-    switch (renderer->type) {
-        case RENDERER_VULKAN:
-            VulkanShutdown(&renderer->vulkan);
+    switch (gRenderer->type) {
+        case RENDERER_TYPE_VULKAN:
+            VulkanShutdown();
             break;
         default:
             LOGF("Unsupported renderer type");
     }
 }
-void RendererRender(renderer_t *renderer)
+
+void RendererRender(void)
 {
-    switch (renderer->type) {
-        case RENDERER_VULKAN:
-            VulkanRender(&renderer->vulkan);
+    switch (gRenderer->type) {
+        case RENDERER_TYPE_VULKAN:
+            VulkanRender();
             break;
         default:
             LOGF("Unsupported renderer type");

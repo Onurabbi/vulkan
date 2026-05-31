@@ -22,6 +22,12 @@ typedef double f64;
 typedef int   b32;
 typedef _Bool b8;
 
+typedef union HMM_Vec2 vec2_t;
+typedef union HMM_Vec3 vec3_t;
+typedef union HMM_Vec4 vec4_t;
+typedef union HMM_Mat4 mat4_t;
+typedef union HMM_Quat quat_t;
+
 #define true  1
 #define false 0
 
@@ -129,6 +135,8 @@ ReportAssertionFailure(#expr);                \
 } while(0)
 #endif
 
+#define SCANCODE_COUNT 512
+
 #define BIT_SET(num, bit) ((num) |= (1 << (bit)))
 #define BIT_CLEAR(num, bit) ((num) &= ~(1 << (bit)))
 #define BIT_CHECK(num, bit) ((num) & (1 << (bit)))
@@ -136,65 +144,60 @@ ReportAssertionFailure(#expr);                \
 
 #define VK_CHECK(expr) LV_ASSERT((expr) == VK_SUCCESS)
 
-//Limits
-#define SCANCODE_COUNT 512
-#define MAX_THREADS 32
-#define MAX_JOBS 256
-#define STRING_ARENA_CAPACITY MEGABYTES(1)
-#define MAX_STRING_COUNT 32768U // we can intern up to 32768 unique strings
-#define SCRATCH_ARENA_CAPACITY MEGABYTES(128)
-#define PERMANENT_ARENA_CAPACITY MEGABYTES(128)
-#define MAX_VERTICES (1U * 1024U * 1024U)
-#define MAX_INDICES (1U * 1024U * 1024U)
-#define MAX_MESHES (1U * 1024U) 
-
 typedef void *vulkan_instance_t;
 typedef void *vulkan_physical_device_t;
 
 typedef struct {
-   void *base;
-   u64  size;
-   u64  used;
+    void *base;
+    u64  size;
+    u64  used;
 }memory_arena_t;
 
 #define ARENA_BOOTSTRAP_SIZE(capacity) ((capacity) + sizeof(memory_arena_t))
 #define PushArray(arena, count, type) (type*)ArenaPushSize((arena), (count) * sizeof(type))
 #define PushStruct(arena, type) PushArray((arena), 1, type)
 
+typedef enum {
+    RENDERER_TYPE_INVALID,
+    RENDERER_TYPE_VULKAN,
+}renderer_type_t;
+
 typedef struct {
-   b8 (*VulkanGetPresentationSupport)(vulkan_instance_t instance, vulkan_physical_device_t physical_device, u32 queue);
-   b8 (*CreateWindow)(void* window, void *arg, const char *title, i32 w, i32 h, u64 flags);
-   void (*PushJob)(void(*jobFunc)(void*,memory_arena_t*), void*);
-   void (*WaitForAllJobs)(void);
-   memory_arena_t *(*PermanentArena)(void);
-   memory_arena_t *(*ScratchArena)(u32 threadIndex);
-   memory_arena_t *(*StringArena)(void);
-   const char *(*ArenaPrintf)(memory_arena_t *arena, const char *fmt, va_list args);
-   void *(*ArenaPushSize)(memory_arena_t *arena, u64 size);
-   void (*ArenaFreeToMarker)(memory_arena_t *arena, u64 marker);
-   u64 (*ArenaGetMarker)(memory_arena_t *arena);
-   char const* const* vulkanInstanceExtensions;
-   u32 vulkanInstanceExtensionCount;
+    b8 (*VulkanGetPresentationSupport)(vulkan_instance_t instance, vulkan_physical_device_t physical_device, u32 queue);
+    b8 (*CreateWindow)(void* window, void *arg, const char *title, i32 w, i32 h, u64 flags);
+    void (*PushJob)(void(*jobFunc)(void*,memory_arena_t*), void*);
+    void (*WaitForAllJobs)(void);
+    memory_arena_t *(*PermanentArena)(void);
+    memory_arena_t *(*ScratchArena)(u32 threadIndex);
+    memory_arena_t *(*StringArena)(void);
+    const char *(*ArenaPrintf)(memory_arena_t *arena, const char *fmt, va_list args);
+    void *(*ArenaPushSize)(memory_arena_t *arena, u64 size);
+    void (*ArenaFreeToMarker)(memory_arena_t *arena, u64 marker);
+    u64 (*ArenaGetMarker)(memory_arena_t *arena);
+    char const* const* vulkanInstanceExtensions;
+    u32 vulkanInstanceExtensionCount;
+    renderer_type_t rendererType;
 }platform_api_t;
 
 typedef struct {
-   platform_api_t api;
-   void *gameState;
+    platform_api_t api;
+    void *gameState;
 } game_memory_t;
 
 typedef struct {
-   b32 event;
-   b32 down;
-   b32 repeat;
+    b32 event;
+    b32 down;
+    b32 repeat;
 }key_event_t;
 
 typedef struct {
-   const b8* keyboardState;
-   key_event_t keyEvents[SCANCODE_COUNT];
-   f32 mouseX, mouseY;
-   f32 mouseXRel, mouseYRel;
-   b8 quit;
-   b8 windowResized;
+    const b8* keyboardState;
+    key_event_t keyEvents[SCANCODE_COUNT];
+    f32 mouseX, mouseY;
+    f32 mouseXRel, mouseYRel;
+    b8 quit;
+    b8 windowResized;
 } game_input_t;
+
 
 #endif // OG_COMMON_H

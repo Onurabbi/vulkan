@@ -2,16 +2,7 @@
 #ifndef VK_BUFFER_H
 #define VK_BUFFER_H
 
-#include "volk.h"
-#include "vma.h"
-
-typedef struct {
-    VmaAllocation allocation;
-    VmaAllocationInfo allocInfo;
-    VkBuffer buffer;
-    VkDeviceAddress deviceAddress;
-    VkDeviceSize size;
-} buffer_t;
+#include "vulkan_types.h"
 
 void UploadBuffer(buffer_t *buffer, const void *data, VkDeviceSize size, VkDeviceSize offset);
 void CreateBuffer(buffer_t *buffer, VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VmaAllocator allocator);

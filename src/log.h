@@ -2,8 +2,8 @@
 // Created by onurabbi on 25/07/25.
 //
 
-#ifndef LOG_H
-#define LOG_H
+#ifndef OG_LOG_H
+#define OG_LOG_H
 
 enum {INFO, WARNING, ERROR, FATAL};
 

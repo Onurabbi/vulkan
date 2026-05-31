@@ -1,5 +1,5 @@
-#ifndef GAME_H
-#define GAME_H
+#ifndef OG_GAME_H
+#define OG_GAME_H
 
 #include "common.h"
 
