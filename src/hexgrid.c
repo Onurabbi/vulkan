@@ -20,4 +20,3 @@ void InitHexgrid(hexgrid_t *grid, u32 width, u32 height)
         }
     }
 }
-

@@ -10,9 +10,9 @@ typedef struct {
 }string_interning_system_t;
 
 const char *StringIntern(const char *str);
-void StringInterningInit(string_interning_system_t *system);
-void StringInterningHotReload(string_interning_system_t *system);
-void StringInterningDeinit(void);
-
+void StringUtilsInit(string_interning_system_t *system);
+void StringUtilsHotReload(string_interning_system_t *system);
+void StringUtilsShutdown(void);
+const char *StringUtilsGetExtensionFromPath(const char *path);
 #endif
 

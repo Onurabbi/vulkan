@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <SDL3/SDL_filesystem.h>
 
-#include "../string_intern.h"
+#include "../string_utils.h"
 #include "../log.h"
 
 typedef struct {
@@ -205,7 +205,7 @@ void LoadShaders(void *data, memory_arena_t *arena)
     shader_t *result = NULL;
     const char *basePath = SDL_GetBasePath();
 
-    const char *fullPath = ArenaPrintf(arena, "%s%s", basePath, "spirv/");
+    const char *fullPath = ArenaPrintf(arena, "%s%s", basePath, "assets/");
 
     i32 spvCount = 0;
     char **glob = SDL_GlobDirectory(fullPath, "*.spv", 0, &spvCount);
@@ -360,14 +360,14 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, const shader_t *shaders, VkDev
 
     VkVertexInputBindingDescription vertexBinding = {
         .binding = 0,
-        .stride = sizeof(Vertex),
+        .stride = sizeof(vertex_t),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
     };
 
     VkVertexInputAttributeDescription vertexAttributes[3] = {
-        {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex,p)},
-        {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex,n)},
-        {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex,t)}
+        {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,p)},
+        {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,n)},
+        {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(vertex_t,t)}
     };
 
     VkPipelineVertexInputStateCreateInfo vertexInputState = {

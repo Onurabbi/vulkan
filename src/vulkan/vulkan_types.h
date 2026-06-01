@@ -70,7 +70,7 @@ typedef struct {
     vec3_t p;
     vec3_t n;
     vec2_t t;
-} Vertex;
+} vertex_t;
 
 typedef struct {
     f32 rx,ry,rz,rw; //because quat_t forces 16 byte alignment
@@ -85,7 +85,7 @@ typedef struct {
 }draw_command_t;
 
 typedef struct {
-    Vertex *vertices;
+    vertex_t *vertices;
     u32 *indices;
     mesh_t *meshes;
     u32 indexCount;//required for drawing

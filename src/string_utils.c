@@ -1,4 +1,4 @@
-#include "string_intern.h"
+#include "string_utils.h"
 #include "og_ds.h"
 #include "platform.h"
 
@@ -24,20 +24,28 @@ const char *StringIntern(const char *str)
     return result;
 }
 
-void StringInterningInit(string_interning_system_t *system)
+void StringUtilsInit(string_interning_system_t *system)
 {
     gSystem = system;
     HashMapInitWithArena(&gSystem->map, PermanentArena(), MAX_STRING_COUNT);
     PushString("");
 }
 
-void StringInterningHotReload(string_interning_system_t *system)
+void StringUtilsHotReload(string_interning_system_t *system)
 {
     gSystem = system;
 }
 
-void StringInterningDeinit(void)
+void StringUtilsShutdown(void)
 {
     HashMapFree(&gSystem->map);
     gSystem = NULL;
+}
+
+const char *StringUtilsGetExtensionFromPath(const char *path)
+{
+    if (!path) return "";
+    const char *ptr = path;
+    while (*ptr && *ptr++ != '.') {} 
+    return ptr;
 }

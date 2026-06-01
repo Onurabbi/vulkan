@@ -51,5 +51,3 @@ void RendererRender(void)
             LOGF("Unsupported renderer type");
     }
 }
-
-

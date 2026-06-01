@@ -86,6 +86,7 @@ do { \
 }while(0);
 
 #define ArrayClear(arr) ((arr) ? ArrayHeader((arr))->count = 0 : (void)0)
+#define ArrayBack(arr) ((arr) ? &(arr)[ArrayCount((arr)) - 1] : NULL)
 
 #define ArrayInitWithArena(arr, a, cap) \
 do { \

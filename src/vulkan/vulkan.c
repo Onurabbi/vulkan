@@ -10,6 +10,7 @@
 #include "../common.h"
 #include "../log.h"
 #include "../limits.h"
+#include "../resource.h"
 
 #include <stdio.h>
 #include <SDL3/SDL.h>
@@ -21,39 +22,10 @@
 #define OG_DS_IMPLEMENTATION
 #include "../og_ds.h"
 
-#define FAST_OBJ_IMPLEMENTATION
-#include "fast_obj.h"
-
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
 static vulkan_context_t *gCtx;
-
-void AppendMesh(Geometry *geom, Vertex *vertices, u32 *indices, u32 textureIndex)
-{
-    mesh_t mesh = {0};
-    mesh.vertexOffset = ArrayCount(geom->vertices);
-    mesh.vertexCount = ArrayCount(vertices);
-
-    ArrayPushArray(geom->vertices, vertices, ArrayCount(vertices));
-    ArrayPushArray(geom->indices, indices, ArrayCount(indices));
-
-    vec3_t center =  {0};
-    for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        HMM_Add(center, vertices[i].p);
-    }
-    HMM_Div(center, (f32)ArrayCount(vertices));
-
-    f32 radius = 0.0f;
-    for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        radius = MAX(radius, HMM_Len(HMM_Sub(vertices[i].p, center)));
-    }
-    mesh.center = center;
-    mesh.radius = radius;
-    mesh.textureIndex = textureIndex;
-
-    ArrayPush(geom->meshes, mesh);
-}
 
 VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask, VkImageLayout oldLayout, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask, VkImageLayout newLayout, VkImageAspectFlags aspectMask, u32 baseMipLevel, u32 levelCount)
 {
@@ -124,84 +96,35 @@ void StageBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 srcStageM
     vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo);
 }
 
-b8 LoadObj(Vertex **ppVertices, const char *path, memory_arena_t *arena) 
+static void AddMeshToGeometry(Geometry *geom, memory_arena_t *arena, const char *path)
 {
-    Vertex *vertices = NULL;
-    fastObjMesh *obj = fast_obj_read("../assets/suzanne.obj");
-    if (obj) {
-        u32 index_count = 0;
-        for (u32 i = 0; i < obj->face_count; i++) {
-            index_count += 3 * (obj->face_vertices[i] - 2);
+    mesh_resource_t *meshResource = ResourceSystemGetMeshResource(path);
+    vertex_t *vertices = meshResource->vertices;
+    if (meshResource) {
+        mesh_t mesh = {0};
+        mesh.vertexOffset = ArrayCount(geom->vertices);
+        mesh.vertexCount = ArrayCount(vertices);
+        
+        ArrayPushArray(geom->vertices, vertices, ArrayCount(vertices));
+        for (u32 i = 0; i < ArrayCount(vertices); i++) {
+            ArrayPush(geom->indices, i);
         }
 
-        ArrayInitWithArena(vertices, arena, index_count);
-        ArrayResize(vertices, index_count);
-
-        u32 vertex_offset = 0;
-        u32 index_offset = 0;
-
-        for (u32 i = 0; i < obj->face_count; i++) {
-            for (u32 j = 0; j < obj->face_vertices[i]; j++) {
-                fastObjIndex gi = obj->indices[index_offset + j];
-                if (j >= 3) { 
-                    vertices[vertex_offset + 0] = vertices[vertex_offset - 3];
-                    vertices[vertex_offset + 1] = vertices[vertex_offset - 1];
-                    vertex_offset += 2;
-                }
-
-                Vertex *v = &vertices[vertex_offset++];
-                v->p.X = obj->positions[3 * gi.p + 0];
-                v->p.Y = obj->positions[3 * gi.p + 1];
-                v->p.Z = obj->positions[3 * gi.p + 2];
-                v->t.X = obj->texcoords[2 * gi.t + 0];
-                v->t.Y = 1.0f - obj->texcoords[2 * gi.t + 1];
-                v->n.X = obj->normals[3 * gi.n + 0];
-                v->n.Y = obj->normals[3 * gi.n + 1];
-                v->n.Z = obj->normals[3 * gi.n + 2];
-            }
-            index_offset += obj->face_vertices[i];
+        vec3_t center =  {0};
+        for (u32 i = 0; i < ArrayCount(vertices); i++) {
+            HMM_Add(center, vertices[i].p);
         }
-        LV_ASSERT(vertex_offset == index_count);
-    }
+        HMM_Div(center, (f32)ArrayCount(vertices));
 
-    *ppVertices = vertices;
+        f32 radius = 0.0f;
+        for (u32 i = 0; i < ArrayCount(vertices); i++) {
+            radius = MAX(radius, HMM_Len(HMM_Sub(vertices[i].p, center)));
+        }
+        mesh.center = center;
+        mesh.radius = radius;
+        mesh.textureIndex = 0;
 
-    fast_obj_destroy(obj);
-    return true;
-}
-
-static b8 LoadMesh(Geometry *geom, const char *path, memory_arena_t *arena, u32 textureIndex)
-{
-    Vertex *vertices = NULL;
-    if (!LoadObj(&vertices, path, arena)) {
-        printf("Unable to load mesh from path: %s\n", path);
-        return false;
-    }
-
-    u32 *indices = NULL;
-    ArrayInitWithArena(indices, arena, ArrayCount(vertices));
-    ArrayResize(indices, ArrayCount(vertices));
-
-    for (u32 i = 0; i < ArrayCount(indices); i++) {
-        indices[i] = i;
-    }
-
-    AppendMesh(geom, vertices, indices, textureIndex);
-
-    return true;
-}
-
-static void GeomLoadFunc(void *data, memory_arena_t *arena)
-{
-    //we only need this temporarily to load the mesh data into buffers
-    Geometry *geometry = (Geometry *)data;
-    
-    ArrayInitWithArena(geometry->vertices, arena, MAX_VERTICES);
-    ArrayInitWithArena(geometry->indices, arena, MAX_INDICES);
-    ArrayInitWithArena(geometry->meshes, arena, MAX_MESHES);
-
-    if (!LoadMesh(geometry, "../assets/suzanne.obj", arena, 0)) {
-        LOGF("Unable to load mesh");
+        ArrayPush(geom->meshes, mesh);
     }
 }
 
@@ -747,14 +670,17 @@ void VulkanInit(vulkan_context_t *ctx)
     draw_data_t *drawData = NULL;
     const char *texturePaths;
 
-    //launch job to load geometry
-    PushJob(GeomLoadFunc, &ctx->geometry);
+    ArrayInitWithArena(ctx->geometry.vertices, ScratchArena(0), MAX_VERTICES);
+    ArrayInitWithArena(ctx->geometry.indices, ScratchArena(0), MAX_INDICES);
+    ArrayInitWithArena(ctx->geometry.meshes, ScratchArena(0), MAX_MESHES);
+
+    AddMeshToGeometry(&ctx->geometry, ScratchArena(0), "assets/suzanne.obj");
 
     shader_t *shaders = NULL;
     PushJob(LoadShaders, &shaders);
     WaitForAllJobs();
 
-    VkDeviceSize vBufSize = sizeof(Vertex) * ArrayCount(ctx->geometry.vertices);
+    VkDeviceSize vBufSize = sizeof(vertex_t) * ArrayCount(ctx->geometry.vertices);
     CreateBuffer(&ctx->vertexBuffer, 
         ctx->device,
         vBufSize, 
@@ -924,7 +850,7 @@ void VulkanInit(vulkan_context_t *ctx)
     VK_CHECK(vkAllocateCommandBuffers(ctx->device, &cbAllocInfo, ctx->commandBuffers));
 
     for (u32 i = 0; i < ARRAY_SIZE(ctx->textures); i++) {
-        const char * texPath = ArenaPrintf(ScratchArena(0), "../assets/suzanne%u.ktx", i);
+        const char * texPath = ArenaPrintf(ScratchArena(0), "assets/suzanne%u.ktx", i);
         CreateTexture(&ctx->textures[i], &ctx->textureDescriptors[i], &ctx->scratchBuffer, ctx->device, ctx->allocator, ctx->commandPool, ctx->queue, texPath);
     }
 
@@ -977,4 +903,3 @@ void VulkanInit(vulkan_context_t *ctx)
 
     gCtx = ctx;
 }
-

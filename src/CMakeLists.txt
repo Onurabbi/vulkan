@@ -22,18 +22,43 @@ if (UNIX)
     set(SLANGC "$ENV{VULKAN_SDK}/bin/slangc")
 endif()
 
-file(GLOB_RECURSE SLANG_SOURCE_FILES "../assets/*slang")
+set(ASSET_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets")
+set(ASSET_OUTPUT_DIR "${PROJECT_BINARY_DIR}/../assets")
 
-set(SPIRV_OUTPUT_DIR "${PROJECT_BINARY_DIR}/../spirv/")
-foreach(SLANG ${SLANG_SOURCE_FILES})
-    get_filename_component(STEM ${SLANG} NAME_WLE)
-    set(SPIRV "${SPIRV_OUTPUT_DIR}${STEM}.spv")
+file(GLOB_RECURSE SLANG_SOURCE_FILES "${ASSET_SOURCE_DIR}/*.slang")
+
+set(SPIRV_BINARY_FILES "")
+foreach(SLANG_FILE ${SLANG_SOURCE_FILES})
+    string(REPLACE "${ASSET_SOURCE_DIR}/" "" RELATIVE_SLANG_FILE ${SLANG_FILE})
+    string(REPLACE ".slang" ".spv" SPIRV_FILE_REL ${RELATIVE_SLANG_FILE})
+    set(SPIRV_FILE_ABS "${ASSET_OUTPUT_DIR}/${SPIRV_FILE_REL}")
+    get_filename_component(SPIRV_DIR ${SPIRV_FILE_ABS} DIRECTORY)
+
     add_custom_command(
-        OUTPUT ${SPIRV}
-        DEPENDS ${SLANG} "../assets/mesh.h"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_OUTPUT_DIR}"
-        COMMAND ${SLANGC} ${SLANG} -target spirv -fvk-use-scalar-layout -o ${SPIRV})
-    list(APPEND SPIRV_BINARY_FILES ${SPIRV})
+        OUTPUT ${SPIRV_FILE_ABS}
+        DEPENDS ${SLANG_FILE} "${ASSET_SOURCE_DIR}/mesh.h"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_DIR}"
+        COMMAND ${SLANGC} ${SLANG_FILE} -target spirv -fvk-use-scalar-layout -o ${SPIRV_FILE_ABS}
+        COMMENT "Compiling ${SLANG_FILE} to ${SPIRV_FILE_ABS}")
+    list(APPEND SPIRV_BINARY_FILES ${SPIRV_FILE_ABS})
+endforeach()
+
+file(GLOB_RECURSE ASSET_FILES "${ASSET_SOURCE_DIR}/*.obj"
+                              "${ASSET_SOURCE_DIR}/*.ktx")
+
+set(COPIED_ASSET_FILES "")
+foreach(ASSET_FILE ${ASSET_FILES})
+    string(REPLACE "${ASSET_SOURCE_DIR}/" "" RELATIVE_ASSET_FILE ${ASSET_FILE})
+    set(DEST_FILE "${ASSET_OUTPUT_DIR}/${RELATIVE_ASSET_FILE}")
+    get_filename_component(DEST_DIR ${DEST_FILE} DIRECTORY)
+
+    add_custom_command(
+        OUTPUT ${DEST_FILE}
+        DEPENDS ${ASSET_FILE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEST_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy "${ASSET_FILE}" "${DEST_FILE}"
+        COMMENT "Copying ${ASSET_FILE} to ${DEST_FILE}")
+    list(APPEND COPIED_ASSET_FILES ${DEST_FILE})
 endforeach()
 
 add_library(Game SHARED "game.c"
@@ -41,9 +66,10 @@ add_library(Game SHARED "game.c"
                         "og_ds.c"
                         "platform.c"
                         "renderer.c"
-                        "string_intern.c"
+                        "string_utils.c"
                         "hexgrid.h"
                         "hexgrid.c"
+                        "resource.c"
                         "vulkan/vulkan.c"
                         "vulkan/buffer.c"
                         "vulkan/shader.c"
@@ -55,4 +81,5 @@ target_link_libraries(Game PRIVATE SDL3::SDL3 ktx)
 target_include_directories(Game PRIVATE "extern" $ENV{VULKAN_SDK}/include)
 
 add_custom_target(compile_shaders DEPENDS ${SPIRV_BINARY_FILES})
-add_dependencies(Game compile_shaders)
+add_custom_target(copy_assets DEPENDS ${COPIED_ASSET_FILES})
+add_dependencies(Game compile_shaders copy_assets)

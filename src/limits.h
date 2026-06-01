@@ -17,4 +17,3 @@
 #define MAX_RESOURCES (16U * 1024U)
 
 #endif
-
