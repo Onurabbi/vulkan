@@ -92,7 +92,6 @@ typedef struct {
 }Geometry;
 
 typedef struct {
-    const char *name;
     char *spirv; //dynamic array
     VkShaderStageFlagBits stage;
 

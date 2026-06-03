@@ -19,6 +19,7 @@
 
 #include "../string_utils.h"
 #include "../log.h"
+#include "../resource.h"
 
 typedef struct {
     u32 opCode;
@@ -59,8 +60,13 @@ static VkDescriptorType GetDescriptorType(SpvOp op, u32 imageSampled)
     }
 }
 
-static void ParseShader(shader_t *shader, const u32*code, u32 codeSize, memory_arena_t *arena)
+static void ParseShader(shader_t *shader, const resource_t *shaderResource, memory_arena_t *arena)
 {
+    u32 *code = (u32 *)shaderResource->spirv;
+    u32 codeSize = ArrayCount(shaderResource->spirv) / sizeof(u32);
+
+    shader->spirv = (char *)shaderResource->spirv;
+
     LV_ASSERT(code[0] == SpvMagicNumber && "Invalid SPIR-V magic number");
 
     u32 idBound = code[3];
@@ -83,7 +89,7 @@ static void ParseShader(shader_t *shader, const u32*code, u32 codeSize, memory_a
         switch (opCode) {
             case SpvOpEntryPoint: {
                 LV_ASSERT(wordCount >= 2);
-                shader->stage = GetShaderStage((SpvExecutionModel)insn[1]);
+                shader->stage |= GetShaderStage((SpvExecutionModel)insn[1]);
                 break;
             }
             case SpvOpExecutionMode: {
@@ -173,67 +179,6 @@ static void ParseShader(shader_t *shader, const u32*code, u32 codeSize, memory_a
     }
 }
 
-static b8 LoadShader(shader_t *shader, const char *path, memory_arena_t *arena)
-{
-    FILE *file = fopen(path, "rb");
-    if (!file) {
-        printf("Failed to open shader file: %s\n", path);
-        return false;
-    }
-
-    fseek(file, 0, SEEK_END);
-    long fileSize = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    ArrayInitWithArena(shader->spirv, arena, fileSize);
-    ArrayResize(shader->spirv, fileSize);
-
-    size_t rc = fread(shader->spirv, 1, fileSize, file);
-    LV_ASSERT(rc == fileSize && "Failed to read entire shader file");
-
-    fclose(file);
-
-    LV_ASSERT(fileSize % sizeof(uint32_t) == 0 && "SPIR-V file size must be a multiple of 4");
-
-    ParseShader(shader, (const uint32_t*)shader->spirv, fileSize / sizeof(uint32_t), arena);
-
-    return true;
-}
-
-void LoadShaders(void *data, memory_arena_t *arena)
-{
-    shader_t *result = NULL;
-    const char *basePath = SDL_GetBasePath();
-
-    const char *fullPath = ArenaPrintf(arena, "%s%s", basePath, "assets/");
-
-    i32 spvCount = 0;
-    char **glob = SDL_GlobDirectory(fullPath, "*.spv", 0, &spvCount);
-    if (!glob) {
-        LOGE("Failed to enumerate shader directory: %s\n", fullPath);
-    }
-
-    ArrayInitWithArena(result, arena, spvCount);
-
-    for (u32 i = 0; i < spvCount; i++) {
-        shader_t shader = {0};
-        shader.name = StringIntern(glob[i]);
-
-        //basePath is guaranteed to end with a slash, so we don't need to add an extra one here.
-        const char *shaderPath = ArenaPrintf(arena, "%s%s", fullPath, glob[i]);
-        if (!LoadShader(&shader, shaderPath, arena)) {
-            LOGE("Failed to load shader: %s\n", shaderPath);
-            continue;
-        }
-
-        ArrayPush(result, shader);
-    }
-
-    SDL_free(glob);
-
-    *(shader_t**)data = result;
-}
-
 VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount)
 {
     VkDescriptorSetLayout result;
@@ -273,29 +218,22 @@ void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device)
     DestroyGraphicsPipeline(pipeline, device);
 }
 
-static const shader_t *FindShaderByName(const shader_t *shaders, const char *name)
+void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *name, u32 pushConstantSize) 
 {
-    const shader_t *result = NULL;
-    const char *shaderName = StringIntern(name);
-    for (u32 i = 0; i < ArrayCount(shaders); i++) {
-        if (shaders[i].name == shaderName) {
-            result = &shaders[i];
-            break;
-        }
+    const resource_t *shaderResource = ResourceSystemGetResource(name);
+    if (!shaderResource) {
+        return;
     }
-    return result;
-}
 
-void CreateComputePipeline(pipeline_t *pipeline, shader_t *shaders, VkDevice device, const char *name, u32 pushConstantSize) 
-{
-    const shader_t *shader = FindShaderByName(shaders, name);
-    LV_ASSERT(shader && "Shader not found for pipeline creation");
-    LV_ASSERT(shader->stage == VK_SHADER_STAGE_COMPUTE_BIT);
+    shader_t shader = {0};
+    ParseShader(&shader, shaderResource, ScratchArena(0));
     
+    LV_ASSERT(shader.stage == VK_SHADER_STAGE_COMPUTE_BIT);
+
     VkShaderModuleCreateInfo shaderModuleCI = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = ArrayCount(shader->spirv),
-        .pCode = (const u32*)shader->spirv,
+        .codeSize = ArrayCount(shader.spirv),
+        .pCode = (const u32*)shader.spirv,
     };
     VK_CHECK(vkCreateShaderModule(device, &shaderModuleCI, NULL, &pipeline->shaderModule));
     
@@ -330,15 +268,22 @@ void CreateComputePipeline(pipeline_t *pipeline, shader_t *shaders, VkDevice dev
     VK_CHECK(vkCreateComputePipelines(device, NULL, 1, &ci, 0, &pipeline->pipeline));
 }
 
-void CreateGraphicsPipeline(pipeline_t *pipeline, const shader_t *shaders, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout)
+void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout)
 {
-    const shader_t *shader = FindShaderByName(shaders, name);
-    LV_ASSERT(shader && "Shader not found for pipeline creation");
+    const resource_t *shaderResource = ResourceSystemGetResource(name);
+    if (!shaderResource) {
+        return;
+    }
+    
+    shader_t shader = {0};
+    ParseShader(&shader, shaderResource, ScratchArena(0));
+
+    LV_ASSERT((shader.stage & VK_SHADER_STAGE_VERTEX_BIT) && (shader.stage & VK_SHADER_STAGE_FRAGMENT_BIT));
 
     VkShaderModuleCreateInfo shaderModuleCI = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = ArrayCount(shader->spirv),
-        .pCode = (const uint32_t*)shader->spirv,
+        .codeSize = ArrayCount(shader.spirv),
+        .pCode = (const uint32_t*)shader.spirv,
     };
     VK_CHECK(vkCreateShaderModule(device, &shaderModuleCI, NULL, &pipeline->shaderModule));
 

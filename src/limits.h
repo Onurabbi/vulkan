@@ -15,5 +15,5 @@
 #define MAX_MESHES (1U * 1024U) 
 #define MAX_MESHES (1U * 1024U)
 #define MAX_RESOURCES (16U * 1024U)
-
+#define MAX_SHADERS (32U)
 #endif

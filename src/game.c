@@ -28,6 +28,13 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
         RendererInit(&gameState->renderer);
         gameState->isInitialized = true;
         gameMemory->gameState = gameState;
+        gameMemory->updateMarker = ArenaGetMarker(PermanentArena());
+        gameMemory->renderMarker = 0;
+    }
+
+    ArenaFreeToMarker(PermanentArena(), gameMemory->updateMarker);
+    for (u32 i = 0; i < gameMemory->threadCount; i++) {
+        ArenaFreeToMarker(ScratchArena(i), 0);
     }
 
     for (u32 i = 0; i < SCANCODE_COUNT; i++) {
@@ -44,10 +51,13 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
         }
     }
     gameState->windowResized = gameInput->windowResized;
+    //do updates e.g.
+    gameMemory->renderMarker = ArenaGetMarker(PermanentArena());
 }
 
 LV_EXPORT void Render(game_memory_t *gameMemory)
 {
+    ArenaFreeToMarker(PermanentArena(), gameMemory->renderMarker);
     game_state_t *gameState = (game_state_t *)gameMemory->gameState;
     RendererRender();
 }

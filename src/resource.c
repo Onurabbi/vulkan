@@ -6,11 +6,13 @@
 #define FAST_OBJ_IMPLEMENTATION
 #include "fast_obj.h"
 
+#include <SDL3/SDL_filesystem.h>
+
 static resource_system_t *gResourceSystem;
 
 static void LoadMesh(void *data, memory_arena_t *arena)
 {
-    mesh_resource_t *meshResource = (mesh_resource_t *)data;
+    resource_t *meshResource = (resource_t *)data;
 
     vertex_t *vertices = NULL;
     const char *path = meshResource->path;
@@ -57,6 +59,78 @@ static void LoadMesh(void *data, memory_arena_t *arena)
     fast_obj_destroy(obj);
 }
 
+static void LoadShader(void *data, memory_arena_t *arena)
+{
+    resource_t *shaderResource = (resource_t *)data;
+
+    const char *path = shaderResource->path;
+    uint8_t *spirv = NULL;
+    FILE *file = fopen(path, "rb");
+    fseek(file, 0, SEEK_END);
+    u32 fileSize = (u32)ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    LV_ASSERT((fileSize % sizeof(u32) == 0) && "SPIR-V file size must be a multiple of 4");
+
+    ArrayInitWithArena(spirv, arena, fileSize);
+    ArrayResize(spirv, fileSize);
+
+    LV_ASSERT((fread(spirv, 1, fileSize, file) == fileSize) && ("Failed to read entire shader file"));
+
+    fclose(file);
+
+    shaderResource->spirv = spirv;
+}
+
+static void ResourceSystemLoadResource(resource_t *resources, const char *fileName)
+{
+    SDL_LockMutex(gResourceSystem->mutex);
+
+    resource_t resource = {0};
+    const char *internedPath = StringIntern(ArenaPrintf(ScratchArena(0), "%s%s", gResourceSystem->assetDir, fileName));
+    resource.path = internedPath;
+    u64 data = 0;
+    if (!HashMapLookup(&gResourceSystem->map, internedPath, (u32)strlen(internedPath), &data)) {
+        ArrayPush(resources, resource);
+        void *ptrData = ArrayBack(resources);
+        // deduce the type from extension
+        const char *extension = StringUtilsGetExtensionFromPath(internedPath);
+        if (strncmp(extension, "spv", 3) == 0) {
+            PushJob(LoadShader, ptrData);
+        } else if (strncmp(extension, "obj", 3) == 0) {
+            PushJob(LoadMesh, ptrData);
+        } else if (strncmp(extension, "ktx", 3) == 0) {
+            LOGI("%s is a KTX texture path", extension);
+        }
+
+        data = (u64)ptrData;
+        HashMapSet(&gResourceSystem->map, internedPath, (u32)strlen(internedPath), data);
+    } else {
+        LOGW("Resource at %s already loaded!", internedPath);
+    }
+    SDL_UnlockMutex(gResourceSystem->mutex);
+}
+
+static resource_t *LoadResources(const char *assetDir, const char *pattern, memory_arena_t *arena)
+{
+    resource_t *resources = NULL;
+
+    i32 count = 0;
+    char **glob = SDL_GlobDirectory(assetDir, pattern, 0, &count);
+    if (!glob) {
+        LOGE("Failed to enumerate directory: %s", assetDir);
+        return NULL;
+    }
+
+    ArrayInitWithArena(resources, arena, count);
+    for (u32 i = 0; i < count; i++) {
+        ResourceSystemLoadResource(resources, glob[i]);
+    }
+    SDL_free(glob);
+
+    return resources;
+}
+
 void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
 {
     gResourceSystem = resourceSystem;
@@ -68,13 +142,10 @@ void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
         return;
     }
 
-    ArrayInitWithArena(resourceSystem->meshResources, PermanentArena(), MAX_MESHES);
-
-    ResourceSystemLoadResource("assets/suzanne.obj");
-
-    ResourceSystemLoadResource("assets/suzanne3.ktx");
-    ResourceSystemLoadResource("assests/shader.spv");
-    ResourceSystemLoadResource("assets/compute_shader.spv");
+    const char *basePath = SDL_GetBasePath();
+    gResourceSystem->assetDir = StringIntern(ArenaPrintf(ScratchArena(0), "%s%s", basePath, "assets/"));
+    gResourceSystem->shaderResources = LoadResources(gResourceSystem->assetDir, "*.spv", PermanentArena());
+    gResourceSystem->meshResources = LoadResources(gResourceSystem->assetDir, "*.obj", PermanentArena());
 
     WaitForAllJobs();
 }
@@ -92,46 +163,12 @@ void ResourceSystemHotReload(resource_system_t *resourceSystem)
     gResourceSystem = resourceSystem;
 }
 
-mesh_resource_t *ResourceSystemGetMeshResource(const char *path)
+const resource_t *ResourceSystemGetResource(const char *fileName)
 {
-    SDL_LockMutex(gResourceSystem->mutex);
-    mesh_resource_t *result = NULL;
-    u64 data;
-    if (HashMapLookup(&gResourceSystem->map, path, (u32)strlen(path), &data)) {
-        result = (mesh_resource_t *)data;
-    } else {
-        LOGE("Unable to find resource: %s", path);
+    const char *fullPath = ArenaPrintf(ScratchArena(0), "%s%s", gResourceSystem->assetDir, fileName);
+    u64 data = 0;
+    if (!HashMapLookup(&gResourceSystem->map, fullPath, strlen(fullPath), &data)) {
+        LOGE("Unable to find resource %s", fullPath);
     }
-    SDL_UnlockMutex(gResourceSystem->mutex);
-    return result;
-}
-
-void ResourceSystemLoadResource(const char *path)
-{
-    SDL_LockMutex(gResourceSystem->mutex);
-    void *dataPtr = NULL;
-    u64 data;
-    if (!HashMapLookup(&gResourceSystem->map, path, (u32)strlen(path), &data)) {
-        const char *internedPath = StringIntern(path);
-        // deduce the type from extension
-        const char *extension = StringUtilsGetExtensionFromPath(internedPath);
-        if (strncmp(extension, "spv", 3) == 0) {
-        } else if (strncmp(extension, "obj", 3) == 0) {
-            mesh_resource_t res = {
-                .path = internedPath,
-                .vertices = NULL,
-            };
-            ArrayPush(gResourceSystem->meshResources, res);
-            dataPtr = ArrayBack(gResourceSystem->meshResources);
-            PushJob(LoadMesh, dataPtr);
-        } else if (strncmp(extension, "ktx", 3) == 0) {
-            LOGI("%s is a KTX texture path", extension);
-        }
-
-        data = (u64)dataPtr;
-        HashMapSet(&gResourceSystem->map, internedPath, (u32)strlen(internedPath), data);
-    } else {
-        LOGW("Resource at %s already loaded!", path);
-    }
-    SDL_UnlockMutex(gResourceSystem->mutex);
+    return (const resource_t *)data;
 }

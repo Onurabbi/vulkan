@@ -182,6 +182,9 @@ typedef struct {
 typedef struct {
     platform_api_t api;
     void *gameState;
+    u64 updateMarker; //where permanent arena should be before update
+    u64 renderMarker; //where permanent arena should be before render
+    u32 threadCount;
 } game_memory_t;
 
 typedef struct {

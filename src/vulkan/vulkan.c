@@ -96,36 +96,39 @@ void StageBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 srcStageM
     vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo);
 }
 
-static void AddMeshToGeometry(Geometry *geom, memory_arena_t *arena, const char *path)
+static void AddMeshToScene(Geometry *geom, const char *name)
 {
-    mesh_resource_t *meshResource = ResourceSystemGetMeshResource(path);
-    vertex_t *vertices = meshResource->vertices;
-    if (meshResource) {
-        mesh_t mesh = {0};
-        mesh.vertexOffset = ArrayCount(geom->vertices);
-        mesh.vertexCount = ArrayCount(vertices);
-        
-        ArrayPushArray(geom->vertices, vertices, ArrayCount(vertices));
-        for (u32 i = 0; i < ArrayCount(vertices); i++) {
-            ArrayPush(geom->indices, i);
-        }
-
-        vec3_t center =  {0};
-        for (u32 i = 0; i < ArrayCount(vertices); i++) {
-            HMM_Add(center, vertices[i].p);
-        }
-        HMM_Div(center, (f32)ArrayCount(vertices));
-
-        f32 radius = 0.0f;
-        for (u32 i = 0; i < ArrayCount(vertices); i++) {
-            radius = MAX(radius, HMM_Len(HMM_Sub(vertices[i].p, center)));
-        }
-        mesh.center = center;
-        mesh.radius = radius;
-        mesh.textureIndex = 0;
-
-        ArrayPush(geom->meshes, mesh);
+    const resource_t *meshResource = ResourceSystemGetResource(name);
+    if (!meshResource) {
+        return;
     }
+
+    vertex_t *vertices = meshResource->vertices;
+
+    mesh_t mesh = {0};
+    mesh.vertexOffset = ArrayCount(geom->vertices);
+    mesh.vertexCount = ArrayCount(vertices);
+    
+    ArrayPushArray(geom->vertices, vertices, ArrayCount(vertices));
+    for (u32 i = 0; i < ArrayCount(vertices); i++) {
+        ArrayPush(geom->indices, i);
+    }
+
+    vec3_t center =  {0};
+    for (u32 i = 0; i < ArrayCount(vertices); i++) {
+        HMM_Add(center, vertices[i].p);
+    }
+    HMM_Div(center, (f32)ArrayCount(vertices));
+
+    f32 radius = 0.0f;
+    for (u32 i = 0; i < ArrayCount(vertices); i++) {
+        radius = MAX(radius, HMM_Len(HMM_Sub(vertices[i].p, center)));
+    }
+    mesh.center = center;
+    mesh.radius = radius;
+    mesh.textureIndex = 0;
+
+    ArrayPush(geom->meshes, mesh);
 }
 
 void VulkanShutdown(void)
@@ -668,17 +671,12 @@ void VulkanInit(vulkan_context_t *ctx)
 
     material_t *materials = NULL;
     draw_data_t *drawData = NULL;
-    const char *texturePaths;
 
     ArrayInitWithArena(ctx->geometry.vertices, ScratchArena(0), MAX_VERTICES);
     ArrayInitWithArena(ctx->geometry.indices, ScratchArena(0), MAX_INDICES);
     ArrayInitWithArena(ctx->geometry.meshes, ScratchArena(0), MAX_MESHES);
 
-    AddMeshToGeometry(&ctx->geometry, ScratchArena(0), "assets/suzanne.obj");
-
-    shader_t *shaders = NULL;
-    PushJob(LoadShaders, &shaders);
-    WaitForAllJobs();
+    AddMeshToScene(&ctx->geometry, "suzanne.obj");
 
     VkDeviceSize vBufSize = sizeof(vertex_t) * ArrayCount(ctx->geometry.vertices);
     CreateBuffer(&ctx->vertexBuffer, 
@@ -870,8 +868,8 @@ void VulkanInit(vulkan_context_t *ctx)
 
     ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, ARRAY_SIZE(ctx->textures));
 
-    CreateGraphicsPipeline(&ctx->pipeline, shaders, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(shader_data_t), ctx->texLayout);
-    CreateComputePipeline(&ctx->computePipeline, shaders, ctx->device, "compute_shader.spv", sizeof(shader_data_t));
+    CreateGraphicsPipeline(&ctx->pipeline, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(shader_data_t), ctx->texLayout);
+    CreateComputePipeline(&ctx->computePipeline, ctx->device, "compute_shader.spv", sizeof(shader_data_t));
 
     u32 variableDescCount = ARRAY_SIZE(ctx->textures);
     VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {

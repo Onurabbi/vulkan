@@ -380,6 +380,10 @@ int main(int argc, char *argv[])
 #if defined (RENDERER_VULKAN)
     gameMemory->api.rendererType = RENDERER_TYPE_VULKAN;
 #endif
+    gameMemory->threadCount = threadCount;
+    gameMemory->renderMarker = 0;
+    gameMemory->updateMarker = 0;
+    
     //Init threads
     mutex = SDL_CreateMutex();
     if (!mutex) {
