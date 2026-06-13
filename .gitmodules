@@ -4,3 +4,6 @@
 [submodule "src/extern/KTX-Software"]
 	path = src/extern/KTX-Software
 	url = https://github.com/KhronosGroup/KTX-Software.git
+[submodule "src/extern/meshoptimizer"]
+	path = src/extern/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer.git

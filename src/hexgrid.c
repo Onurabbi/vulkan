@@ -7,7 +7,7 @@ static const float innerRadius = outerRadius * 0.866025404f;
 
 void InitHexgrid(hexgrid_t *grid, u32 width, u32 height)
 {
-    ArrayInitWithArena(grid->cells, PermanentArena(), width * height);
+    ArrayInitWithArena(grid->cells, PermanentArena(0), width * height);
     grid->width = width;
     grid->height = height;
 

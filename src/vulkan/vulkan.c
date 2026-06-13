@@ -96,23 +96,64 @@ void StageBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 srcStageM
     vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo);
 }
 
-static void AddMeshToScene(Geometry *geom, const char *name)
+void VulkanLoadShader(resource_t *shaderResource, const char *path, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+{
+    u8 *spirv = NULL;
+    FILE *file = fopen(path, "rb");
+    fseek(file, 0, SEEK_END);
+    u32 fileSize = (u32)ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    LV_ASSERT((fileSize % sizeof(u32) == 0) && "SPIR-V file size must be a multiple of 4");
+
+    ArrayInitWithArena(spirv, scratchArena, fileSize);
+    ArrayResize(spirv, fileSize);
+
+    LV_ASSERT((fread(spirv, 1, fileSize, file) == fileSize) && ("Failed to read entire shader file"));
+
+    fclose(file);
+
+    ParseShader(shaderResource, spirv, permanentArena);
+}
+
+void VulkanUnloadShader(resource_t *shaderResource)
+{
+    //do nothing
+}
+
+void VulkanLoadTexture(resource_t *textureResource, const char *path)
+{
+    if (!CreateTexture(&textureResource->texture, &gCtx->scratchBuffer, gCtx->device, gCtx->allocator, gCtx->commandPool, gCtx->queue, path)) {
+        LOGE("Unable to load texture %s", path);
+    }
+}
+
+void VulkanUnloadTexture(resource_t *textureResource)
+{
+    // TODO: Is this fast after the first run?
+    VK_CHECK(vkDeviceWaitIdle(gCtx->device));
+    DestroyTexture(&textureResource->texture, gCtx->allocator, gCtx->device);
+}
+
+static void AddMeshToScene(Geometry *geom, const char *name, memory_arena_t *arena)
 {
     const resource_t *meshResource = ResourceSystemGetResource(name);
-    if (!meshResource) {
-        return;
-    }
 
-    vertex_t *vertices = meshResource->vertices;
+    vertex_t *vertices = meshResource->mesh.vertices;
+
+    u32 *indices = NULL;
+    ArrayInitWithArena(indices, arena, ArrayCount(vertices));
+    for (u32 i = 0; i < ArrayCount(vertices); i++) {
+        ArrayPush(geom->indices, i);
+    }
+    u32 *remap = NULL;
+    ArrayInitWithArena(remap, arena, ArrayCount(vertices));
 
     mesh_t mesh = {0};
     mesh.vertexOffset = ArrayCount(geom->vertices);
     mesh.vertexCount = ArrayCount(vertices);
     
     ArrayPushArray(geom->vertices, vertices, ArrayCount(vertices));
-    for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        ArrayPush(geom->indices, i);
-    }
 
     vec3_t center =  {0};
     for (u32 i = 0; i < ArrayCount(vertices); i++) {
@@ -126,7 +167,7 @@ static void AddMeshToScene(Geometry *geom, const char *name)
     }
     mesh.center = center;
     mesh.radius = radius;
-    mesh.textureIndex = 0;
+    mesh.textureIndex = SDL_rand(3);
 
     ArrayPush(geom->meshes, mesh);
 }
@@ -134,10 +175,6 @@ static void AddMeshToScene(Geometry *geom, const char *name)
 void VulkanShutdown(void)
 {
     VK_CHECK(vkDeviceWaitIdle(gCtx->device));
-
-    for (u32 i = 0; i < ARRAY_SIZE(gCtx->textures); i++) {
-        DestroyTexture(&gCtx->textures[i], gCtx->allocator, gCtx->device);
-    }
 
     DestroyGraphicsPipeline(&gCtx->pipeline, gCtx->device);
     DestroyComputePipeline(&gCtx->computePipeline, gCtx->device);
@@ -184,8 +221,214 @@ void VulkanShutdown(void)
     volkFinalize();
 }
 
+static void VulkanLoadResources(vulkan_context_t *ctx)
+{
+    ctx->resourcesLoaded = true;
+
+    //draws
+    SDL_srand(188);
+
+    Geometry geometry;
+
+    ArrayInitWithArena(geometry.vertices, ScratchArena(0), MAX_VERTICES);
+    ArrayInitWithArena(geometry.indices, ScratchArena(0), MAX_INDICES);
+    ArrayInitWithArena(geometry.meshes, ScratchArena(0), MAX_MESHES);
+
+    AddMeshToScene(&geometry, "suzanne.obj");
+
+    VkDeviceSize vBufSize = sizeof(vertex_t) * ArrayCount(geometry.vertices);
+    CreateBuffer(&ctx->vertexBuffer, 
+        ctx->device,
+        vBufSize, 
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VMA_MEMORY_USAGE_AUTO, 
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+        VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        ctx->allocator);
+    UploadBuffer(&ctx->vertexBuffer, geometry.vertices, vBufSize, 0);
+
+    VkDeviceSize iBufSize = sizeof(u32) * ArrayCount(geometry.indices);
+    CreateBuffer(&ctx->indexBuffer, 
+        ctx->device,
+        iBufSize,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
+        VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        ctx->allocator);
+    UploadBuffer(&ctx->indexBuffer, geometry.indices, iBufSize, 0);
+
+    ctx->indexCount = ArrayCount(geometry.indices);
+
+    VkDeviceSize meshBufSize = sizeof(mesh_t) * ArrayCount(geometry.meshes);
+    CreateBuffer(&ctx->meshBuffer,
+        ctx->device,
+        meshBufSize,
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
+        VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        ctx->allocator);
+    UploadBuffer(&ctx->meshBuffer, geometry.meshes, meshBufSize, 0);
+
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        CreateBuffer(&ctx->shaderGlobalsBuffers[i],
+            ctx->device,
+            sizeof(globals_t), 
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
+            VMA_MEMORY_USAGE_AUTO, 
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+            VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            ctx->allocator);    
+    }
+
+    ctx->drawCount = 25000;
+    f32 sceneRadius = 300.0f;
+
+    memory_arena_t *arena = PermanentArena(0);
+    draw_data_t *draws = NULL;
+    
+    ArrayInitWithArena(draws, arena, ctx->drawCount);
+    ArrayResize(draws, ctx->drawCount);
+
+    for (u32 i = 0; i < ctx->drawCount; i++) {
+        draw_data_t *draw = &draws[i];
+        draw->position.X = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
+        draw->position.Y = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
+        draw->position.Z = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
+        draw->scale = (f32)(SDL_randf()) + 1; 
+        draw->scale *= 2.0f;
+        draw->meshIndex = SDL_rand(ArrayCount(geometry.meshes));
+
+        f32 angle = SDL_randf() * SDL_PI_F / 2.0f;
+        vec3_t axis = (vec3_t){
+            (f32)(SDL_randf() * 2.0f - 1.0f),
+            (f32)(SDL_randf() * 2.0f - 1.0f),
+            (f32)(SDL_randf() * 2.0f - 1.0f)
+        };
+
+        axis = HMM_NormV3(axis);
+
+        quat_t orientation = HMM_QFromAxisAngle_LH(axis, angle);
+        draw->rx = orientation.X;
+        draw->ry = orientation.Y;
+        draw->rz = orientation.Z;
+        draw->rw = orientation.W;
+    }
+
+    CreateBuffer(&ctx->drawBuffer, 
+        ctx->device,
+        sizeof(draw_data_t) * ctx->drawCount,
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
+        VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        ctx->allocator);
+
+    UploadBuffer(&ctx->drawBuffer, draws, sizeof(draw_data_t) * ctx->drawCount, 0);
+    
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        CreateBuffer(&ctx->drawCommandBuffers[i], 
+            ctx->device,
+            ctx->drawCount * sizeof(draw_command_t), 
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
+            VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 
+            0,
+            ctx->allocator);
+    }
+
+    CreateBuffer(&ctx->drawCommandCountBuffer, 
+        ctx->device,
+        sizeof(u32), 
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
+        VMA_MEMORY_USAGE_AUTO, 
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+        VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        ctx->allocator
+    );
+
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        ctx->shaderData[i].globalsAddress = ctx->shaderGlobalsBuffers[i].deviceAddress;
+        ctx->shaderData[i].drawDataAddress = ctx->drawBuffer.deviceAddress;
+        ctx->shaderData[i].meshAddress = ctx->meshBuffer.deviceAddress;
+        ctx->shaderData[i].drawCommandAddress = ctx->drawCommandBuffers[i].deviceAddress;
+        ctx->shaderData[i].drawCommandCountAddress = ctx->drawCommandCountBuffer.deviceAddress;
+    }
+
+    const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena(0));
+    u32 texCount = ArrayCount(textureResources);
+
+    VkDescriptorPoolSize poolSize = {
+        .type =  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = texCount,
+    };
+
+    VkDescriptorPoolCreateInfo descPoolCI = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 1,
+        .pPoolSizes = &poolSize,
+    };
+
+    VK_CHECK(vkCreateDescriptorPool(ctx->device, &descPoolCI, NULL, &ctx->descriptorPool));
+
+    ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount);
+
+    VkFormat imageFormat = ctx->swapchainImages[0].format;
+    VkFormat depthFormat = ctx->depthImage.format;
+    CreateGraphicsPipeline(&ctx->pipeline, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(shader_data_t), ctx->texLayout);
+    CreateComputePipeline(&ctx->computePipeline, ctx->device, "compute_shader.spv", sizeof(shader_data_t));
+
+    VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
+        .descriptorSetCount = 1,
+        .pDescriptorCounts = &texCount,
+    };
+
+    VkDescriptorSetAllocateInfo texDescSetAlloc = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = &variableDescCountAI,
+        .descriptorPool = ctx->descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &ctx->texLayout,
+    };
+
+    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &texDescSetAlloc, &ctx->descriptorSetTex));
+
+    VkDescriptorImageInfo *textureDescriptors = NULL;
+    ArrayInitWithArena(textureDescriptors, ScratchArena(0), texCount);
+    for (u32 i = 0; i < texCount; i++) {
+        VkDescriptorImageInfo info = {0};
+        info.imageLayout = textureResources[i]->texture.layout;
+        info.imageView   = textureResources[i]->texture.view;
+        info.sampler     = textureResources[i]->texture.sampler;
+        ArrayPush(textureDescriptors, info);
+    }
+
+    VkWriteDescriptorSet writeDescSet = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = ctx->descriptorSetTex,
+        .dstBinding = 0,
+        .descriptorCount = texCount,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = textureDescriptors,
+    };
+
+    vkUpdateDescriptorSets(ctx->device, 1, &writeDescSet, 0, NULL);
+}
+
 void VulkanRender(void)
 {
+    if (!gCtx->resourcesLoaded) {
+        VulkanLoadResources(gCtx);
+    }
+
     float cameraZ = 6.0f;
 
     VK_CHECK(vkWaitForFences(gCtx->device, 1, &gCtx->fences[gCtx->frameIndex], true, UINT64_MAX));
@@ -668,135 +911,7 @@ void VulkanInit(vulkan_context_t *ctx)
     ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;
-
-    material_t *materials = NULL;
-    draw_data_t *drawData = NULL;
-
-    ArrayInitWithArena(ctx->geometry.vertices, ScratchArena(0), MAX_VERTICES);
-    ArrayInitWithArena(ctx->geometry.indices, ScratchArena(0), MAX_INDICES);
-    ArrayInitWithArena(ctx->geometry.meshes, ScratchArena(0), MAX_MESHES);
-
-    AddMeshToScene(&ctx->geometry, "suzanne.obj");
-
-    VkDeviceSize vBufSize = sizeof(vertex_t) * ArrayCount(ctx->geometry.vertices);
-    CreateBuffer(&ctx->vertexBuffer, 
-        ctx->device,
-        vBufSize, 
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VMA_MEMORY_USAGE_AUTO, 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
-        VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        ctx->allocator);
-    UploadBuffer(&ctx->vertexBuffer, ctx->geometry.vertices, vBufSize, 0);
-
-    VkDeviceSize iBufSize = sizeof(u32) * ArrayCount(ctx->geometry.indices);
-    CreateBuffer(&ctx->indexBuffer, 
-        ctx->device,
-        iBufSize,
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VMA_MEMORY_USAGE_AUTO,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
-        VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        ctx->allocator);
-    UploadBuffer(&ctx->indexBuffer, ctx->geometry.indices, iBufSize, 0);
-
-    ctx->geometry.indexCount = ArrayCount(ctx->geometry.indices);
-
-    VkDeviceSize meshBufSize = sizeof(mesh_t) * ArrayCount(ctx->geometry.meshes);
-    CreateBuffer(&ctx->meshBuffer,
-        ctx->device,
-        meshBufSize,
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VMA_MEMORY_USAGE_AUTO,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
-        VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        ctx->allocator);
-    UploadBuffer(&ctx->meshBuffer, ctx->geometry.meshes, meshBufSize, 0);
-
-    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        CreateBuffer(&ctx->shaderGlobalsBuffers[i],
-            ctx->device,
-            sizeof(globals_t), 
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
-            VMA_MEMORY_USAGE_AUTO, 
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
-            VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            ctx->allocator);    
-    }
-
-    //draws
-    SDL_srand(42);
-    ctx->drawCount = 25000;
-    f32 sceneRadius = 300.0f;
-
-    memory_arena_t *arena = PermanentArena();
-    draw_data_t *draws = NULL;
-    
-    ArrayInitWithArena(draws, arena, ctx->drawCount);
-    ArrayResize(draws, ctx->drawCount);
-
-    for (u32 i = 0; i < ctx->drawCount; i++) {
-        draw_data_t *draw = &draws[i];
-        draw->position.X = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
-        draw->position.Y = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
-        draw->position.Z = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
-        draw->scale = (f32)(SDL_randf()) + 1; 
-        draw->scale *= 2.0f;
-        draw->meshIndex = 0;
-
-        f32 angle = SDL_randf() * SDL_PI_F / 2.0f;
-        vec3_t axis = (vec3_t){
-            (f32)(SDL_randf() * 2.0f - 1.0f),
-            (f32)(SDL_randf() * 2.0f - 1.0f),
-            (f32)(SDL_randf() * 2.0f - 1.0f)
-        };
-
-        axis = HMM_NormV3(axis);
-
-        quat_t orientation = HMM_QFromAxisAngle_LH(axis, angle);
-        draw->rx = orientation.X;
-        draw->ry = orientation.Y;
-        draw->rz = orientation.Z;
-        draw->rw = orientation.W;
-    }
-
-    CreateBuffer(&ctx->drawBuffer, 
-        ctx->device,
-        sizeof(draw_data_t) * ctx->drawCount,
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VMA_MEMORY_USAGE_AUTO,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
-        VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        ctx->allocator);
  
-    UploadBuffer(&ctx->drawBuffer, draws, sizeof(draw_data_t) * ctx->drawCount, 0);
-    LOGI("Size of draw data: %zu", sizeof(draw_data_t));
-    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        CreateBuffer(&ctx->drawCommandBuffers[i], 
-            ctx->device,
-            ctx->drawCount * sizeof(draw_command_t), 
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
-            VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 
-            0,
-            ctx->allocator);
-    }
-
-    CreateBuffer(&ctx->drawCommandCountBuffer, 
-        ctx->device,
-        sizeof(u32), 
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
-        VMA_MEMORY_USAGE_AUTO, 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
-        VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        ctx->allocator
-    );
-
     CreateBuffer(&ctx->scratchBuffer, 
         ctx->device,
         128 * 1024 * 1024, 
@@ -804,14 +919,6 @@ void VulkanInit(vulkan_context_t *ctx)
         VMA_MEMORY_USAGE_AUTO, 
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
         ctx->allocator);
-
-    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        ctx->shaderData[i].globalsAddress = ctx->shaderGlobalsBuffers[i].deviceAddress;
-        ctx->shaderData[i].drawDataAddress = ctx->drawBuffer.deviceAddress;
-        ctx->shaderData[i].meshAddress = ctx->meshBuffer.deviceAddress;
-        ctx->shaderData[i].drawCommandAddress = ctx->drawCommandBuffers[i].deviceAddress;
-        ctx->shaderData[i].drawCommandCountAddress = ctx->drawCommandCountBuffer.deviceAddress;
-    }
 
     VkSemaphoreCreateInfo semaphoreCI = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -846,58 +953,6 @@ void VulkanInit(vulkan_context_t *ctx)
     };
 
     VK_CHECK(vkAllocateCommandBuffers(ctx->device, &cbAllocInfo, ctx->commandBuffers));
-
-    for (u32 i = 0; i < ARRAY_SIZE(ctx->textures); i++) {
-        const char * texPath = ArenaPrintf(ScratchArena(0), "assets/suzanne%u.ktx", i);
-        CreateTexture(&ctx->textures[i], &ctx->textureDescriptors[i], &ctx->scratchBuffer, ctx->device, ctx->allocator, ctx->commandPool, ctx->queue, texPath);
-    }
-
-    VkDescriptorPoolSize poolSize = {
-        .type =  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = ARRAY_SIZE(ctx->textures),
-    };
-
-    VkDescriptorPoolCreateInfo descPoolCI = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = 1,
-        .poolSizeCount = 1,
-        .pPoolSizes = &poolSize,
-    };
-
-    VK_CHECK(vkCreateDescriptorPool(ctx->device, &descPoolCI, NULL, &ctx->descriptorPool));
-
-    ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, ARRAY_SIZE(ctx->textures));
-
-    CreateGraphicsPipeline(&ctx->pipeline, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(shader_data_t), ctx->texLayout);
-    CreateComputePipeline(&ctx->computePipeline, ctx->device, "compute_shader.spv", sizeof(shader_data_t));
-
-    u32 variableDescCount = ARRAY_SIZE(ctx->textures);
-    VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
-        .descriptorSetCount = 1,
-        .pDescriptorCounts = &variableDescCount,
-    };
-
-    VkDescriptorSetAllocateInfo texDescSetAlloc = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .pNext = &variableDescCountAI,
-        .descriptorPool = ctx->descriptorPool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &ctx->texLayout,
-    };
-
-    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &texDescSetAlloc, &ctx->descriptorSetTex));
-
-    VkWriteDescriptorSet writeDescSet = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ctx->descriptorSetTex,
-        .dstBinding = 0,
-        .descriptorCount = ARRAY_SIZE(ctx->textures),
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = ctx->textureDescriptors,
-    };
-
-    vkUpdateDescriptorSets(ctx->device, 1, &writeDescSet, 0, NULL);
 
     gCtx = ctx;
 }

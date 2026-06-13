@@ -3,6 +3,8 @@
 #include "string_utils.h"
 #include "log.h"
 
+#include "vulkan/vulkan.h"
+
 #define FAST_OBJ_IMPLEMENTATION
 #include "fast_obj.h"
 
@@ -10,9 +12,23 @@
 
 static resource_system_t *gResourceSystem;
 
-static void LoadMesh(void *data, memory_arena_t *arena)
+static void LoadTexture(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+{
+    resource_t *textureResource = (resource_t *)data;
+    textureResource->type = RESOURCE_TYPE_TEXTURE;
+    (void)scratchArena;
+    (void)permanentArena;
+    //TODO: It seems like an absolute hassle to parallelize this :(
+    SDL_LockMutex(gResourceSystem->mutex);
+    VulkanLoadTexture(textureResource, textureResource->path);
+    SDL_UnlockMutex(gResourceSystem->mutex);
+}
+
+// TODO: Move this to its own file
+static void LoadMesh(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
 {
     resource_t *meshResource = (resource_t *)data;
+    meshResource->type = RESOURCE_TYPE_MESH;
 
     vertex_t *vertices = NULL;
     const char *path = meshResource->path;
@@ -24,7 +40,7 @@ static void LoadMesh(void *data, memory_arena_t *arena)
             index_count += 3 * (obj->face_vertices[i] - 2);
         }
 
-        ArrayInitWithArena(vertices, arena, index_count);
+        ArrayInitWithArena(vertices, permanentArena, index_count);
         ArrayResize(vertices, index_count);
 
         u32 vertex_offset = 0;
@@ -54,32 +70,17 @@ static void LoadMesh(void *data, memory_arena_t *arena)
         LV_ASSERT(vertex_offset == index_count);
     }
 
-    meshResource->vertices = vertices;
+    meshResource->mesh.vertices = vertices;
 
     fast_obj_destroy(obj);
 }
 
-static void LoadShader(void *data, memory_arena_t *arena)
+static void LoadShader(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
 {
     resource_t *shaderResource = (resource_t *)data;
+    shaderResource->type = RESOURCE_TYPE_SHADER;
 
-    const char *path = shaderResource->path;
-    uint8_t *spirv = NULL;
-    FILE *file = fopen(path, "rb");
-    fseek(file, 0, SEEK_END);
-    u32 fileSize = (u32)ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    LV_ASSERT((fileSize % sizeof(u32) == 0) && "SPIR-V file size must be a multiple of 4");
-
-    ArrayInitWithArena(spirv, arena, fileSize);
-    ArrayResize(spirv, fileSize);
-
-    LV_ASSERT((fread(spirv, 1, fileSize, file) == fileSize) && ("Failed to read entire shader file"));
-
-    fclose(file);
-
-    shaderResource->spirv = spirv;
+    VulkanLoadShader(shaderResource, shaderResource->path, scratchArena, permanentArena);
 }
 
 static void ResourceSystemLoadResource(resource_t *resources, const char *fileName)
@@ -92,18 +93,21 @@ static void ResourceSystemLoadResource(resource_t *resources, const char *fileNa
     u64 data = 0;
     if (!HashMapLookup(&gResourceSystem->map, internedPath, (u32)strlen(internedPath), &data)) {
         ArrayPush(resources, resource);
-        void *ptrData = ArrayBack(resources);
+        resource_t *resourceData = ArrayBack(resources);
         // deduce the type from extension
         const char *extension = StringUtilsGetExtensionFromPath(internedPath);
         if (strncmp(extension, "spv", 3) == 0) {
-            PushJob(LoadShader, ptrData);
+            gResourceSystem->shaderCount++;
+            PushJob(LoadShader, resourceData);
         } else if (strncmp(extension, "obj", 3) == 0) {
-            PushJob(LoadMesh, ptrData);
+            gResourceSystem->meshCount++;
+            PushJob(LoadMesh, resourceData);
         } else if (strncmp(extension, "ktx", 3) == 0) {
-            LOGI("%s is a KTX texture path", extension);
+            gResourceSystem->textureCount++;
+            PushJob(LoadTexture, resourceData);
         }
 
-        data = (u64)ptrData;
+        data = (u64)resourceData;
         HashMapSet(&gResourceSystem->map, internedPath, (u32)strlen(internedPath), data);
     } else {
         LOGW("Resource at %s already loaded!", internedPath);
@@ -111,31 +115,25 @@ static void ResourceSystemLoadResource(resource_t *resources, const char *fileNa
     SDL_UnlockMutex(gResourceSystem->mutex);
 }
 
-static resource_t *LoadResources(const char *assetDir, const char *pattern, memory_arena_t *arena)
+static void LoadResources(resource_t *resources, const char *assetDir, const char *pattern, memory_arena_t *arena)
 {
-    resource_t *resources = NULL;
-
     i32 count = 0;
     char **glob = SDL_GlobDirectory(assetDir, pattern, 0, &count);
     if (!glob) {
         LOGE("Failed to enumerate directory: %s", assetDir);
-        return NULL;
     }
 
-    ArrayInitWithArena(resources, arena, count);
     for (u32 i = 0; i < count; i++) {
         ResourceSystemLoadResource(resources, glob[i]);
     }
     SDL_free(glob);
-
-    return resources;
 }
 
 void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
 {
     gResourceSystem = resourceSystem;
 
-    HashMapInitWithArena(&resourceSystem->map, PermanentArena(), resourceCapacity);
+    HashMapInitWithArena(&resourceSystem->map, PermanentArena(0), resourceCapacity);
     resourceSystem->mutex = SDL_CreateMutex();
     if (!resourceSystem->mutex) {
         LOGF("Unable to initialize resource system mutex");
@@ -144,14 +142,29 @@ void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
 
     const char *basePath = SDL_GetBasePath();
     gResourceSystem->assetDir = StringIntern(ArenaPrintf(ScratchArena(0), "%s%s", basePath, "assets/"));
-    gResourceSystem->shaderResources = LoadResources(gResourceSystem->assetDir, "*.spv", PermanentArena());
-    gResourceSystem->meshResources = LoadResources(gResourceSystem->assetDir, "*.obj", PermanentArena());
+    ArrayInitWithArena(gResourceSystem->resources, PermanentArena(0), resourceCapacity);
+    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, "*.spv", PermanentArena(0));
+    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, "*.obj", PermanentArena(0));
+    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, "*.ktx", PermanentArena(0));
 
     WaitForAllJobs();
 }
 
 void ResourceSystemShutdown(void)
 {
+    for (u32 i = 0; i < ArrayCount(gResourceSystem->resources); i++) {
+        resource_t *resource = &gResourceSystem->resources[i];
+        switch(resource->type) {
+            case RESOURCE_TYPE_MESH: 
+                break;
+            case RESOURCE_TYPE_SHADER:
+                break;
+            case RESOURCE_TYPE_TEXTURE:
+                VulkanUnloadTexture(resource);
+                break;
+        }
+    }
+
     HashMapFree(&gResourceSystem->map);
     SDL_DestroyMutex(gResourceSystem->mutex);
 
@@ -171,4 +184,17 @@ const resource_t *ResourceSystemGetResource(const char *fileName)
         LOGE("Unable to find resource %s", fullPath);
     }
     return (const resource_t *)data;
+}
+
+const resource_t **ResourceSystemGetTextures(memory_arena_t *arena)
+{
+    const resource_t **ppTextures = NULL;
+    ArrayInitWithArena(ppTextures, arena, gResourceSystem->textureCount);
+    for (u32 i = 0; i < ArrayCount(gResourceSystem->resources); i++) {
+        const resource_t *resource = &gResourceSystem->resources[i];
+        if (resource->type == RESOURCE_TYPE_TEXTURE) {
+            ArrayPush(ppTextures, resource);
+        }
+    }
+    return ppTextures;
 }

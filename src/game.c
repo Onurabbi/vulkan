@@ -22,18 +22,20 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
     game_state_t *gameState = gameMemory->gameState;
     if (!gameState || !gameState->isInitialized) {
         PlatformInit(&gameMemory->api);
-        gameState = PushStruct(PermanentArena(), game_state_t);
+        gameState = PushStruct(PermanentArena(0), game_state_t);
         StringUtilsInit(&gameState->stringInterning);
-        ResourceSystemInit(&gameState->resourceSystem, MAX_RESOURCES);
         RendererInit(&gameState->renderer);
+        ResourceSystemInit(&gameState->resourceSystem, MAX_RESOURCES);
         gameState->isInitialized = true;
         gameMemory->gameState = gameState;
-        gameMemory->updateMarker = ArenaGetMarker(PermanentArena());
-        gameMemory->renderMarker = 0;
+        for (u32 i = 0; i < gameMemory->threadCount; i++) {
+            gameMemory->updateMarkers[i] = ArenaGetMarker(PermanentArena(i));
+            gameMemory->renderMarkers[i] = 0;
+        }
     }
 
-    ArenaFreeToMarker(PermanentArena(), gameMemory->updateMarker);
     for (u32 i = 0; i < gameMemory->threadCount; i++) {
+        ArenaFreeToMarker(PermanentArena(i), gameMemory->updateMarkers[i]);
         ArenaFreeToMarker(ScratchArena(i), 0);
     }
 
@@ -52,12 +54,17 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
     }
     gameState->windowResized = gameInput->windowResized;
     //do updates e.g.
-    gameMemory->renderMarker = ArenaGetMarker(PermanentArena());
+    for (u32 i = 0; i < gameMemory->threadCount; i++) {
+        gameMemory->renderMarkers[i] = ArenaGetMarker(PermanentArena(i));
+    }
 }
 
 LV_EXPORT void Render(game_memory_t *gameMemory)
 {
-    ArenaFreeToMarker(PermanentArena(), gameMemory->renderMarker);
+    for (u32 i = 0; i < gameMemory->threadCount; i++) {
+        ArenaFreeToMarker(PermanentArena(i), gameMemory->renderMarkers[i]);
+    }
+
     game_state_t *gameState = (game_state_t *)gameMemory->gameState;
     RendererRender();
 }
@@ -65,8 +72,8 @@ LV_EXPORT void Render(game_memory_t *gameMemory)
 LV_EXPORT void Shutdown(game_memory_t *gameMemory)
 {
     game_state_t *gameState = (game_state_t *)gameMemory->gameState;
-    RendererShutdown();
     ResourceSystemShutdown();
+    RendererShutdown();
     StringUtilsShutdown();
     PlatformShutdown();
 }

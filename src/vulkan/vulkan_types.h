@@ -19,13 +19,6 @@
 typedef struct SDL_Window SDL_Window;
 
 typedef struct {
-    VmaAllocation allocation;
-    VkImage image;
-    VkImageView view;
-    VkSampler sampler;
-}texture_t;
-
-typedef struct {
     VkImage image;
     VkImageView view;
     VkFormat format;
@@ -59,11 +52,18 @@ typedef struct {
 } material_t;
 
 typedef struct {
+    u32 indexOffset;
+    u32 indexCount;
+    f32 error;
+} mesh_lod_t;
+
+typedef struct {
     vec3_t center;
     f32 radius;
     u32 vertexOffset;
     u32 vertexCount;
     u32 textureIndex;
+    mesh_lod_t meshLods[8];
 } mesh_t;
 
 typedef struct {
@@ -90,17 +90,6 @@ typedef struct {
     mesh_t *meshes;
     u32 indexCount;//required for drawing
 }Geometry;
-
-typedef struct {
-    char *spirv; //dynamic array
-    VkShaderStageFlagBits stage;
-
-    u32 localSizeX;
-    u32 localSizeY;
-    u32 localSizeZ;
-
-    b8 usesPushConstants;
-} shader_t;
 
 typedef struct {
     f32 P00, P11, near, far;
@@ -146,8 +135,6 @@ typedef struct {
     buffer_t drawCommandCountBuffer;
     buffer_t scratchBuffer;
     VmaAllocator allocator;
-    texture_t textures[3];
-    VkDescriptorImageInfo textureDescriptors[3];
     VkDescriptorSetLayout texLayout;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
@@ -157,14 +144,15 @@ typedef struct {
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffers[MAX_FRAMES_IN_FLIGHT];//max frames in flight
     shader_data_t shaderData[3];
-    Geometry geometry;
     //static compute_data_t gComputeData;
     pipeline_t pipeline;
     pipeline_t computePipeline;
     f32 cameraZ;
     u32 frameIndex;
-    b8 windowResized;
     u32 drawCount;
+    u32 indexCount;
+    b8 windowResized;
+    b8 resourcesLoaded;
 } vulkan_context_t;
 
 #endif

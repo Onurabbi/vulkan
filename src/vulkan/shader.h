@@ -2,6 +2,9 @@
 #define VK_SHADER_H
 
 #include "vulkan_types.h"
+#include "../resource.h"
+
+void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *arena);
 
 void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout);
 void DestroyGraphicsPipeline(pipeline_t *pipeline, VkDevice device);

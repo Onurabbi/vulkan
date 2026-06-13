@@ -1,4 +1,6 @@
 #include "../common.h"
+#include "../resource.h"
+
 #include "texture.h"
 #include "buffer.h"
 #include "volk.h"
@@ -8,7 +10,7 @@
 #include <ktx.h>
 #include <ktxvulkan.h>
 
-b8 CreateTexture(texture_t *texture, VkDescriptorImageInfo *imageInfo, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path)
+b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path)
 {
     ktxTexture *ktxTex = NULL;
     KTX_error_code err = ktxTexture_CreateFromNamedFile(path, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTex);
@@ -135,15 +137,13 @@ b8 CreateTexture(texture_t *texture, VkDescriptorImageInfo *imageInfo, buffer_t 
 
     VK_CHECK(vkCreateSampler(device, &samplerCI, NULL, &texture->sampler));
 
-    imageInfo->sampler = texture->sampler;
-    imageInfo->imageView = texture->view;
-    imageInfo->imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+    texture->layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
 
     ktxTexture_Destroy(ktxTex);
     return true;
 }
 
-void DestroyTexture(texture_t *texture, VmaAllocator allocator, VkDevice device)
+void DestroyTexture(texture_resource_t *texture, VmaAllocator allocator, VkDevice device)
 {
     vkDestroySampler(device, texture->sampler, NULL);
     vkDestroyImageView(device, texture->view, NULL);

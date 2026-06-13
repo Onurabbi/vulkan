@@ -60,12 +60,12 @@ static VkDescriptorType GetDescriptorType(SpvOp op, u32 imageSampled)
     }
 }
 
-static void ParseShader(shader_t *shader, const resource_t *shaderResource, memory_arena_t *arena)
+void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *arena)
 {
-    u32 *code = (u32 *)shaderResource->spirv;
-    u32 codeSize = ArrayCount(shaderResource->spirv) / sizeof(u32);
-
-    shader->spirv = (char *)shaderResource->spirv;
+    shaderResource->shader.spirv = spirv;
+    
+    u32 *code = (u32 *)spirv;
+    u32 codeSize = ArrayCount(spirv) / sizeof(u32);
 
     LV_ASSERT(code[0] == SpvMagicNumber && "Invalid SPIR-V magic number");
 
@@ -89,7 +89,7 @@ static void ParseShader(shader_t *shader, const resource_t *shaderResource, memo
         switch (opCode) {
             case SpvOpEntryPoint: {
                 LV_ASSERT(wordCount >= 2);
-                shader->stage |= GetShaderStage((SpvExecutionModel)insn[1]);
+                shaderResource->shader.stage |= GetShaderStage((SpvExecutionModel)insn[1]);
                 break;
             }
             case SpvOpExecutionMode: {
@@ -98,9 +98,9 @@ static void ParseShader(shader_t *shader, const resource_t *shaderResource, memo
                 switch (mode) {
                     case SpvExecutionModeLocalSize: {
                         LV_ASSERT(wordCount == 6);
-                        shader->localSizeX = insn[3];
-                        shader->localSizeY = insn[4];
-                        shader->localSizeZ = insn[5];
+                        shaderResource->shader.localSizeX = insn[3];
+                        shaderResource->shader.localSizeY = insn[4];
+                        shaderResource->shader.localSizeZ = insn[5];
                         break;
                     }
                 }
@@ -153,28 +153,28 @@ static void ParseShader(shader_t *shader, const resource_t *shaderResource, memo
         Id id = ids[i];
 
         if (id.opCode == SpvOpVariable && id.storageClass == SpvStorageClassPushConstant) {
-            shader->usesPushConstants = true;
+            shaderResource->shader.usesPushConstants = true;
         }
 
         if  (id.opCode == SpvOpVariable && id.storageClass == SpvStorageClassUniformConstant) {
             LV_ASSERT(id.set == 0 && "Only set 0 is supported for now");
         }
 
-        if (shader->stage == VK_SHADER_STAGE_COMPUTE_BIT) {
+        if (shaderResource->shader.stage == VK_SHADER_STAGE_COMPUTE_BIT) {
             if (localSizeIdX >= 0) {
                 LV_ASSERT(ids[localSizeIdX].opCode == SpvOpConstant && "Local size X must be a constant");
-                shader->localSizeX = ids[localSizeIdX].constant;
+                shaderResource->shader.localSizeX = ids[localSizeIdX].constant;
             }
             if (localSizeIdY >= 0) {
                 LV_ASSERT(ids[localSizeIdY].opCode == SpvOpConstant && "Local size Y must be a constant");
-                shader->localSizeY = ids[localSizeIdY].constant;
+                shaderResource->shader.localSizeY = ids[localSizeIdY].constant;
             }
             if (localSizeIdZ >= 0) {
                 LV_ASSERT(ids[localSizeIdZ].opCode == SpvOpConstant && "Local size Z must be a constant");
-                shader->localSizeZ = ids[localSizeIdZ].constant;
+                shaderResource->shader.localSizeZ = ids[localSizeIdZ].constant;
             }
 
-            LV_ASSERT(shader->localSizeX && shader->localSizeY && shader->localSizeZ && "Compute shader must specify local size");
+            LV_ASSERT(shaderResource->shader.localSizeX && shaderResource->shader.localSizeY && shaderResource->shader.localSizeZ && "Compute shader must specify local size");
         }
     }
 }
@@ -224,16 +224,13 @@ void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *na
     if (!shaderResource) {
         return;
     }
-
-    shader_t shader = {0};
-    ParseShader(&shader, shaderResource, ScratchArena(0));
     
-    LV_ASSERT(shader.stage == VK_SHADER_STAGE_COMPUTE_BIT);
+    LV_ASSERT(shaderResource->shader.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 
     VkShaderModuleCreateInfo shaderModuleCI = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = ArrayCount(shader.spirv),
-        .pCode = (const u32*)shader.spirv,
+        .codeSize = ArrayCount(shaderResource->shader.spirv),
+        .pCode = (const u32*)shaderResource->shader.spirv,
     };
     VK_CHECK(vkCreateShaderModule(device, &shaderModuleCI, NULL, &pipeline->shaderModule));
     
@@ -274,16 +271,13 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
     if (!shaderResource) {
         return;
     }
-    
-    shader_t shader = {0};
-    ParseShader(&shader, shaderResource, ScratchArena(0));
 
-    LV_ASSERT((shader.stage & VK_SHADER_STAGE_VERTEX_BIT) && (shader.stage & VK_SHADER_STAGE_FRAGMENT_BIT));
+    LV_ASSERT((shaderResource->shader.stage & VK_SHADER_STAGE_VERTEX_BIT) && (shaderResource->shader.stage & VK_SHADER_STAGE_FRAGMENT_BIT));
 
     VkShaderModuleCreateInfo shaderModuleCI = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = ArrayCount(shader.spirv),
-        .pCode = (const uint32_t*)shader.spirv,
+        .codeSize = ArrayCount(shaderResource->shader.spirv),
+        .pCode = (const uint32_t*)shaderResource->shader.spirv,
     };
     VK_CHECK(vkCreateShaderModule(device, &shaderModuleCI, NULL, &pipeline->shaderModule));
 
