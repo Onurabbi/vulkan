@@ -25,6 +25,8 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
+#include <meshoptimizer/src/meshoptimizer.h>
+
 static vulkan_context_t *gCtx;
 
 VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask, VkImageLayout oldLayout, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask, VkImageLayout newLayout, VkImageAspectFlags aspectMask, u32 baseMipLevel, u32 levelCount)
@@ -144,10 +146,20 @@ static void AddMeshToScene(Geometry *geom, const char *name, memory_arena_t *are
     u32 *indices = NULL;
     ArrayInitWithArena(indices, arena, ArrayCount(vertices));
     for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        ArrayPush(geom->indices, i);
+        ArrayPush(indices, i);
     }
+
     u32 *remap = NULL;
     ArrayInitWithArena(remap, arena, ArrayCount(vertices));
+    ArrayResize(remap, ArrayCount(vertices));
+    size_t uniqueVertices = meshopt_generateVertexRemap(remap, indices, ArrayCount(indices), vertices, ArrayCount(vertices), sizeof(vertex_t));
+    meshopt_remapVertexBuffer(vertices, vertices, ArrayCount(vertices), sizeof(vertex_t), remap);
+
+    meshopt_remapIndexBuffer(indices, indices, ArrayCount(indices), remap);
+    ArrayResize(vertices, uniqueVertices);
+    
+    meshopt_optimizeVertexCache(indices, indices, ArrayCount(indices), ArrayCount(vertices));
+    meshopt_optimizeVertexFetch(vertices, indices, ArrayCount(indices), vertices, ArrayCount(vertices), sizeof(vertex_t));
 
     mesh_t mesh = {0};
     mesh.vertexOffset = ArrayCount(geom->vertices);
@@ -155,19 +167,75 @@ static void AddMeshToScene(Geometry *geom, const char *name, memory_arena_t *are
     
     ArrayPushArray(geom->vertices, vertices, ArrayCount(vertices));
 
-    vec3_t center =  {0};
+    vec3_t *positions = NULL;
+    ArrayInitWithArena(positions, arena, ArrayCount(vertices));
     for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        HMM_Add(center, vertices[i].p);
+        ArrayPush(positions, vertices[i].p);
     }
-    HMM_Div(center, (f32)ArrayCount(vertices));
+
+    vec3_t *normals = NULL;
+    ArrayInitWithArena(normals, arena, ArrayCount(vertices));
+    for (u32 i = 0; i < ArrayCount(vertices); i++) {
+        ArrayPush(normals, vertices[i].n);
+    }
+
+    vec3_t center =  {0};
+    for (u32 i = 0; i < ArrayCount(positions); i++) {
+        HMM_Add(center, positions[i]);
+    }
+    HMM_Div(center, (f32)ArrayCount(positions));
 
     f32 radius = 0.0f;
-    for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        radius = MAX(radius, HMM_Len(HMM_Sub(vertices[i].p, center)));
+    for (u32 i = 0; i < ArrayCount(positions); i++) {
+        radius = MAX(radius, HMM_Len(HMM_Sub(positions[i], center)));
     }
+
     mesh.center = center;
     mesh.radius = radius;
     mesh.textureIndex = SDL_rand(3);
+
+    f32 lodScale = meshopt_simplifyScale(&positions[0].X, ArrayCount(vertices), sizeof(vec3_t));
+    
+    u32 *lodIndices = indices;
+
+    f32 lodError = 0.0f;
+    f32 normalWeights[3] = { 1.0f, 1.0f, 1.0f };
+
+    while (mesh.lodCount < ARRAY_SIZE(mesh.meshLods)) {
+        mesh_lod_t *lod = &mesh.meshLods[mesh.lodCount++];
+
+        lod->indexOffset = ArrayCount(geom->indices);
+        lod->indexCount  = ArrayCount(lodIndices);
+        
+        ArrayPushArray(geom->indices, lodIndices, lod->indexCount);
+        lod->error = lodError * lodScale;
+
+        if (mesh.lodCount < ARRAY_SIZE(mesh.meshLods)) {
+            const f32 maxError = 1e-1f;
+            const u32 options = meshopt_SimplifySparse;
+
+            size_t nextIndicesTarget = ((size_t)((double)(ArrayCount(lodIndices)) * 0.6) / 3) * 3;
+            f32 nextError = 0.0f;
+
+            size_t nextIndices = meshopt_simplifyWithAttributes(lodIndices, lodIndices, ArrayCount(lodIndices), &positions[0].X, 
+                ArrayCount(vertices), sizeof(vec3_t), &normals[0].X, sizeof(vec3_t), normalWeights, 3, NULL, nextIndicesTarget, maxError, options, &nextError);
+
+            LV_ASSERT(nextIndices <= ArrayCount(lodIndices));
+
+            if (nextIndices == ArrayCount(lodIndices) || nextIndices == 0) {
+                break;
+            }
+
+            if (nextIndices >= (size_t)((double)(ArrayCount(lodIndices)) * 0.85)) {
+                break;
+            }
+
+            ArrayResize(lodIndices, nextIndices);
+            lodError = MAX(lodError * 1.5f, nextError);
+
+            meshopt_optimizeVertexCache(lodIndices, lodIndices, ArrayCount(lodIndices), ArrayCount(vertices));
+        }
+    }
 
     ArrayPush(geom->meshes, mesh);
 }
@@ -234,7 +302,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     ArrayInitWithArena(geometry.indices, ScratchArena(0), MAX_INDICES);
     ArrayInitWithArena(geometry.meshes, ScratchArena(0), MAX_MESHES);
 
-    AddMeshToScene(&geometry, "suzanne.obj");
+    AddMeshToScene(&geometry, "suzanne.obj", ScratchArena(0));
 
     VkDeviceSize vBufSize = sizeof(vertex_t) * ArrayCount(geometry.vertices);
     CreateBuffer(&ctx->vertexBuffer, 

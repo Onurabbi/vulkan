@@ -1,10 +1,18 @@
 
+struct MeshLod {
+    uint indexOffset;
+    uint indexCount;
+    float error;
+};
+
 struct Mesh {
     float3 center;
     float radius;
     uint vertexOffset;
     uint vertexCount;
     uint textureIndex;
+    uint lodCount;
+    MeshLod meshLods[8];
 };
 
 struct DrawData 

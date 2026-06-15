@@ -63,6 +63,7 @@ typedef struct {
     u32 vertexOffset;
     u32 vertexCount;
     u32 textureIndex;
+    u32 lodCount;
     mesh_lod_t meshLods[8];
 } mesh_t;
 
