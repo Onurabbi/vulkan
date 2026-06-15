@@ -150,7 +150,7 @@ void DestroyTexture(texture_resource_t *texture, VmaAllocator allocator, VkDevic
     vmaDestroyImage(allocator, texture->image, texture->allocation);
 }
 
-VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mipLevels)
+VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, u32 mipLevels)
 {
     VkImageViewCreateInfo viewCI = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -167,7 +167,7 @@ VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkI
     return view;
 }
 
-VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  VkImageUsageFlags usage, uint32_t width, uint32_t height, uint32_t mipLevels, VmaAllocation *allocation)
+VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  VkImageUsageFlags usage, u32 width, u32 height, u32 mipLevels, VmaAllocation *allocation)
 {
     VkImageCreateInfo imgCI = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,

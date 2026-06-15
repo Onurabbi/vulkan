@@ -17,18 +17,13 @@ void main(uint3 id : SV_DispatchThreadId)
     }
 
     DrawData meshDraw = drawData[id.x];
-#if 1  
+  
     Mesh mesh = meshes[meshDraw.meshIndex];
     float3 center = mesh.center;
     float radius = mesh.radius;
     uint32_t vertexCount = mesh.vertexCount;
     uint32_t vertexOffset = mesh.vertexOffset;
-#else
-    float3 center = float3(0.0f, 0.0f, 0.0f);
-    float radius = 1.0f;
-    uint32_t vertexCount = 11808;
-    uint32_t vertexOffset = 0;
-#endif
+
     center = rotateQuat(center, meshDraw.orientation) * meshDraw.scale + meshDraw.position;
     center = mul(globals.view, float4(center, 1.0f)).xyz;
     radius = radius * meshDraw.scale;
@@ -41,10 +36,19 @@ void main(uint3 id : SV_DispatchThreadId)
     if (visible) {
         uint dci = __atomic_add(shaderData.drawCommandCount[0], 1);
 
-        drawCommands[dci].indexCount = vertexCount;
+        // Calculate LOD based on distance relative to the object's radius (approximate screen size).
+        // lodScale controls how aggressively LODs drop. Higher value = stays high-detail further away.
+        float lodScale = 5.0f; // Tip: You can pass this via globals to tweak it at runtime!
+        float dist = max(0.0f, distance(center, float3(0)) - radius);
+        float lodTarget = log2(max(1.0f, dist / max(0.001f, radius * lodScale)));
+        uint lodIndex = clamp(int(lodTarget), 0, int(mesh.lodCount) - 1);
+
+        MeshLod lod = mesh.meshLods[lodIndex];
+
+        drawCommands[dci].indexCount = lod.indexCount;
         drawCommands[dci].drawId = id.x;
         drawCommands[dci].instanceCount = 1;
-        drawCommands[dci].firstIndex = 0;
+        drawCommands[dci].firstIndex = lod.indexOffset;
         drawCommands[dci].vertexOffset = vertexOffset;
         drawCommands[dci].firstInstance = 0;
     }
