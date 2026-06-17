@@ -89,8 +89,7 @@ typedef struct {
     vertex_t *vertices;
     u32 *indices;
     mesh_t *meshes;
-    u32 indexCount;//required for drawing
-}Geometry;
+}geometry_t;
 
 typedef struct {
     f32 P00, P11, near, far;

@@ -4,7 +4,6 @@
 #include "game.h"
 #include "platform.h"
 
-#include "memory.h"
 #include "log.h"
 #include "renderer.h"
 
@@ -36,7 +35,6 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
 
     for (u32 i = 0; i < gameMemory->threadCount; i++) {
         ArenaFreeToMarker(PermanentArena(i), gameMemory->updateMarkers[i]);
-        ArenaFreeToMarker(ScratchArena(i), 0);
     }
 
     for (u32 i = 0; i < SCANCODE_COUNT; i++) {
@@ -67,6 +65,12 @@ LV_EXPORT void Render(game_memory_t *gameMemory)
 
     game_state_t *gameState = (game_state_t *)gameMemory->gameState;
     RendererRender();
+
+    // We can release all scratch memory at this point since we don't except any scratch
+    // memory to carry over to next frame
+    for (u32 i = 0; i < gameMemory->threadCount; i++) {
+        ArenaFreeToMarker(ScratchArena(i), 0);
+    }
 }
 
 LV_EXPORT void Shutdown(game_memory_t *gameMemory)

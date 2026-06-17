@@ -2,7 +2,7 @@
 #define OG_RENDERER_H
 
 #include "common.h"
-#include "vulkan/vulkan.h"
+#include "vulkan/vulkan_types.h"
 
 typedef struct {
     renderer_type_t type;

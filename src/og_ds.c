@@ -1,5 +1,5 @@
 #include "og_ds.h"
-#include "platform.h"
+#include "common.h"
 
 u64 hash(const u8* key, u32 length) {
   u64 hash = 14695981039346656037ULL;
@@ -37,7 +37,7 @@ static hash_entry_t *FindEntry(hash_entry_t *entries, u32 capacity, u64 key)
 static void AdjustMapCapacity(hash_map_t *map, u32 newCapacity)
 {
     if (map->arena) {
-        LV_ASSERT(false && "We don't support resizing hash maps that use memory arenas since they can't be reallocated"); 
+        LV_ASSERT(false && "We don't support resizing hash maps that use memory arenas since they can't be reallocated");
         return;
     }
 
@@ -52,7 +52,7 @@ static void AdjustMapCapacity(hash_map_t *map, u32 newCapacity)
 
     for (u32 i = 0; i < map->capacity; i++) {
         hash_entry_t *entry = &map->entries[i];
-        
+
         //we don't copy empty entries or tombstones
         if (entry->key == NIL_KEY) continue;
 
@@ -142,7 +142,7 @@ b8 HashMapDelete(hash_map_t *map, const void *key, u32 keyLength)
     //place a tombstone
     entry->key = NIL_KEY;
     entry->value = 1; //some value that isn't NIL_VAL
-    
+
     return true;
 }
 
@@ -192,7 +192,7 @@ void *ArrayGrow(void *arr, size_t elemSize, u32 minCapacity)
 {
     u32 oldCapacity = ArrayCapacity(arr);
     u32 newCapacity = GROW_CAPACITY(oldCapacity);
-    
+
     if (newCapacity < minCapacity) {
         newCapacity = minCapacity;
     }
@@ -213,7 +213,7 @@ void *ArrayGrow(void *arr, size_t elemSize, u32 minCapacity)
             new_count = minCapacity;
         }
 
-        header = reallocate(oldHeader, oldCapacity * elemSize + sizeof(array_header_t), 
+        header = reallocate(oldHeader, oldCapacity * elemSize + sizeof(array_header_t),
                                                  newCapacity * elemSize + sizeof(array_header_t));
         header->capacity = newCapacity;
         header->count = new_count;
@@ -222,12 +222,12 @@ void *ArrayGrow(void *arr, size_t elemSize, u32 minCapacity)
     return &header[1];
 }
 
-void ArrayFree(void *array) 
+void ArrayFree(void *array)
 {
     if (!array) return;
 
     if (ArrayArena(array)) {
-        LV_ASSERT(false && "We don't support freeing arrays that use memory arenas since they can't be reallocated"); 
+        LV_ASSERT(false && "We don't support freeing arrays that use memory arenas since they can't be reallocated");
         return;
     }
     (void)reallocate(ArrayHeader(array), 0, 0);

@@ -2,6 +2,7 @@
 #define VK_TEXTURE_H
 
 #include "vulkan_types.h"
+#include "../resource.h"
 
 b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path);
 void DestroyTexture(texture_resource_t *texture, VmaAllocator allocator, VkDevice device);

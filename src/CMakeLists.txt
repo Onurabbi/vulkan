@@ -27,26 +27,26 @@ endif()
 set(ASSET_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets")
 set(ASSET_OUTPUT_DIR "${PROJECT_BINARY_DIR}/../assets")
 
-file(GLOB_RECURSE SLANG_SOURCE_FILES "${ASSET_SOURCE_DIR}/*.slang")
+file(GLOB_RECURSE SLANG_SOURCE_FILES "${ASSET_SOURCE_DIR}/shaders/*.slang")
 
 set(SPIRV_BINARY_FILES "")
 foreach(SLANG_FILE ${SLANG_SOURCE_FILES})
-    string(REPLACE "${ASSET_SOURCE_DIR}/" "" RELATIVE_SLANG_FILE ${SLANG_FILE})
+    string(REPLACE "${ASSET_SOURCE_DIR}/shaders/" "" RELATIVE_SLANG_FILE ${SLANG_FILE})
     string(REPLACE ".slang" ".spv" SPIRV_FILE_REL ${RELATIVE_SLANG_FILE})
-    set(SPIRV_FILE_ABS "${ASSET_OUTPUT_DIR}/${SPIRV_FILE_REL}")
+    set(SPIRV_FILE_ABS "${ASSET_OUTPUT_DIR}/shaders/${SPIRV_FILE_REL}")
     get_filename_component(SPIRV_DIR ${SPIRV_FILE_ABS} DIRECTORY)
 
     add_custom_command(
         OUTPUT ${SPIRV_FILE_ABS}
-        DEPENDS ${SLANG_FILE} "${ASSET_SOURCE_DIR}/mesh.h"
+        DEPENDS ${SLANG_FILE} "${ASSET_SOURCE_DIR}/shaders/mesh.h"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_DIR}"
         COMMAND ${SLANGC} ${SLANG_FILE} -target spirv -fvk-use-scalar-layout -o ${SPIRV_FILE_ABS}
         COMMENT "Compiling ${SLANG_FILE} to ${SPIRV_FILE_ABS}")
     list(APPEND SPIRV_BINARY_FILES ${SPIRV_FILE_ABS})
 endforeach()
 
-file(GLOB_RECURSE ASSET_FILES "${ASSET_SOURCE_DIR}/*.obj"
-                              "${ASSET_SOURCE_DIR}/*.ktx")
+file(GLOB_RECURSE ASSET_FILES "${ASSET_SOURCE_DIR}/meshes/*.obj"
+                              "${ASSET_SOURCE_DIR}/textures/*.ktx")
 
 set(COPIED_ASSET_FILES "")
 foreach(ASSET_FILE ${ASSET_FILES})

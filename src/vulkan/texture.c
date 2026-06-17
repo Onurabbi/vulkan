@@ -6,7 +6,6 @@
 #include "volk.h"
 #include "vma.h"
 
-#include <string.h>
 #include <ktx.h>
 #include <ktxvulkan.h>
 
@@ -21,7 +20,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 
     UploadBuffer(scratch, ktxTex->pData, ktxTex->dataSize, 0);
     VkFormat format = ktxTexture_GetVkFormat(ktxTex);
-    texture->image = CreateImage(device, allocator, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
+    texture->image = CreateImage(device, allocator, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         ktxTex->baseWidth, ktxTex->baseHeight, ktxTex->numLevels, &texture->allocation);
 
     texture->view = CreateImageView(device, texture->image, format, VK_IMAGE_ASPECT_COLOR_BIT, ktxTex->numLevels);
@@ -108,7 +107,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
     };
 
     barrierTexInfo.pImageMemoryBarriers = &barrierTexRead;
-    
+
     vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
 
     VK_CHECK(vkEndCommandBuffer(cbOneTime));
@@ -189,6 +188,6 @@ VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  V
 
     VkImage image;
     VK_CHECK(vmaCreateImage(allocator,  &imgCI, &imgAllocCI, &image, allocation, NULL));
-    
+
     return image;
 }

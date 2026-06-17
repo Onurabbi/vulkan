@@ -1,7 +1,6 @@
 #include "shader.h"
 
 #include "../common.h"
-#include "../platform.h"
 #include "../og_ds.h"
 
 #if defined __APPLE__
@@ -17,8 +16,6 @@
 #include <stdio.h>
 #include <SDL3/SDL_filesystem.h>
 
-#include "../string_utils.h"
-#include "../log.h"
 #include "../resource.h"
 
 typedef struct {
@@ -63,7 +60,7 @@ static VkDescriptorType GetDescriptorType(SpvOp op, u32 imageSampled)
 void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *arena)
 {
     shaderResource->shader.spirv = spirv;
-    
+
     u32 *code = (u32 *)spirv;
     u32 codeSize = ArrayCount(spirv) / sizeof(u32);
 
@@ -80,8 +77,8 @@ void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *ar
     int localSizeIdY = -1;
     int localSizeIdZ = -1;
 
-    const u32*insn = &code[5];
-    
+    const u32 *insn = &code[5];
+
     while (insn != &code[codeSize]) {
         u16 opCode = (u16)(insn[0]);
         u16 wordCount = (u16)(insn[0] >> 16);
@@ -182,7 +179,7 @@ void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *ar
 VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount)
 {
     VkDescriptorSetLayout result;
-    //descriptor set layout for indexing. 
+    //descriptor set layout for indexing.
     VkDescriptorBindingFlags descVariableFlag = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
     VkDescriptorSetLayoutBindingFlagsCreateInfo descBindingFlags = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
@@ -218,13 +215,13 @@ void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device)
     DestroyGraphicsPipeline(pipeline, device);
 }
 
-void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *name, u32 pushConstantSize) 
+void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *name, u32 pushConstantSize)
 {
     const resource_t *shaderResource = ResourceSystemGetResource(name);
     if (!shaderResource) {
         return;
     }
-    
+
     LV_ASSERT(shaderResource->shader.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 
     VkShaderModuleCreateInfo shaderModuleCI = {
@@ -233,7 +230,7 @@ void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *na
         .pCode = (const u32*)shaderResource->shader.spirv,
     };
     VK_CHECK(vkCreateShaderModule(device, &shaderModuleCI, NULL, &pipeline->shaderModule));
-    
+
     VkPushConstantRange pushConstantRange = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
         .size = pushConstantSize,
@@ -255,7 +252,7 @@ void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *na
         .module = pipeline->shaderModule,
         .pName = "main",
     };
-    
+
     VkComputePipelineCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .stage = shaderStageCI,

@@ -2,6 +2,8 @@
 #include "platform.h"
 #include "log.h"
 
+#include "vulkan/vulkan.h"
+
 static renderer_t *gRenderer;
 
 void RendererInit(renderer_t *renderer)

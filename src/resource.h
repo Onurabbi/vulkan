@@ -8,7 +8,8 @@
 #include <SDL3/SDL_mutex.h>
 
 typedef struct {
-    vertex_t *vertices;
+    u32 firstMeshIndex; //index into the meshes array that belongs to the resources system.
+    u32 meshCount;
 } mesh_resource_t;
 
 typedef struct {
@@ -51,7 +52,15 @@ typedef struct {
     SDL_Mutex *mutex;
     const char *assetDir;
     hash_map_t map; 
+
     resource_t *resources;
+    
+    // geometry storage. this could be temporary?
+    vertex_t *vertices; 
+    u32      *indices;
+    mesh_t   *meshes;
+
+    u32 sceneCount;
     u32 meshCount;
     u32 shaderCount;
     u32 textureCount;
@@ -63,5 +72,5 @@ void ResourceSystemHotReload(resource_system_t *resourceSystem);
 
 const resource_t *ResourceSystemGetResource(const char *fileName);
 const resource_t **ResourceSystemGetTextures(memory_arena_t *arena);
-
+const geometry_t ResourceSystemGetGeometry(void);
 #endif

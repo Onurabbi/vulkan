@@ -1,7 +1,6 @@
 #ifndef OG_STRING_INTERN_H
 #define OG_STRING_INTERN_H
 
-#include "memory.h"
 #include "og_ds.h"
 
 typedef struct {
@@ -15,4 +14,3 @@ void StringUtilsHotReload(string_interning_system_t *system);
 void StringUtilsShutdown(void);
 const char *StringUtilsGetExtensionFromPath(const char *path);
 #endif
-

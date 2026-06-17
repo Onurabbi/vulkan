@@ -2,7 +2,7 @@
 #define OG_DS_H
 
 #include "common.h"
-#include "limits.h"
+#include "platform.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +10,7 @@
 /****************************  Array ******************************************/
 /**************************************************************************** */
 
-typedef struct 
+typedef struct
 {
     u32 count;
     u32 capacity;

@@ -5,6 +5,8 @@
 #ifndef OG_LOG_H
 #define OG_LOG_H
 
+#include "common.h"
+
 enum {INFO, WARNING, ERROR, FATAL};
 
 #define ANSI_COLOR_RED     "\x1b[31m"
