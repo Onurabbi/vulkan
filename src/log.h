@@ -18,7 +18,7 @@ enum {INFO, WARNING, ERROR, FATAL};
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
 void LogOutput(i32 severity, const char *format, ...);
-void ReportAssertionFailure(const char *expr);
+void ReportAssertionFailure(const char *expr, const char *function, i32 line);
 
 #define LOGI(string,...) LogOutput(INFO, "[%s:%u] " string,__FUNCTION__,__LINE__,##__VA_ARGS__)
 #define LOGW(string,...) LogOutput(WARNING, "[%s:%u] " string,__FUNCTION__,__LINE__,##__VA_ARGS__)

@@ -1,4 +1,5 @@
 #include "resource.h"
+#include "common.h"
 #include "platform.h"
 #include "string_utils.h"
 #include "log.h"
@@ -6,10 +7,13 @@
 #include "vulkan/vulkan.h"
 
 #define FAST_OBJ_IMPLEMENTATION
-#include "fast_obj.h"
+#include <fast_obj.h>
 
 #define CGLTF_IMPLEMENTATION
-#include "cgltf.h"
+#include <cgltf.h>
+
+#define BCDEC_IMPLEMENTATION
+#include <bcdec.h>
 
 #include <meshoptimizer/src/meshoptimizer.h>
 
@@ -17,26 +21,51 @@
 
 static resource_system_t *gResourceSystem;
 
-static void LoadTexture(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+typedef struct {
+    u32 meshOffset;
+    u32 meshCount;
+} mesh_primitive_t;
+
+typedef struct {
+    char **glob;
+    memory_arena_t *scratchArena;
+    memory_arena_t *permanentArena;
+} glob_data_t;
+
+static const char *GetSubDirFromType(resource_type_t type)
 {
-    resource_t *textureResource = (resource_t *)data;
+    const char *dir = NULL;
+    if (type == RESOURCE_TYPE_SHADER) {
+        dir = "shaders/";
+    } else if (type == RESOURCE_TYPE_MESH) {
+        dir = "meshes/";
+    } else if (type == RESOURCE_TYPE_TEXTURE) {
+        dir = "textures/";
+    } else {
+        LOGF("Unknown resource type");
+        return NULL;
+    }
+    return dir;
+}
+
+static const char *GetFullPathFromUri(const char *uri, resource_type_t type, memory_arena_t *arena)
+{
+    const char *dir = GetSubDirFromType(type);
+    return StringIntern(ArenaPrintf(arena, "%s%s%s", gResourceSystem->assetDir, dir, uri));
+}
+
+static void LoadTexture(resource_t *textureResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+{
     textureResource->type = RESOURCE_TYPE_TEXTURE;
     (void)scratchArena;
     (void)permanentArena;
-    //TODO: It seems like an absolute hassle to parallelize this :(
-    SDL_LockMutex(gResourceSystem->mutex);
+
+    textureResource->texture.textureIndex = gResourceSystem->textureCount - 1;
     VulkanLoadTexture(textureResource, textureResource->path);
-    SDL_UnlockMutex(gResourceSystem->mutex);
 }
 
-static void AppendMesh(resource_t *meshResource, vertex_t *vertices, memory_arena_t *permanentArena, memory_arena_t *scratchArena)
+static void AppendMesh(vertex_t *vertices, u32 *indices, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
 {
-    u32 *indices = NULL;
-    ArrayInitWithArena(indices, scratchArena, ArrayCount(vertices));
-    for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        ArrayPush(indices, i);
-    }
-
     u32 *remap = NULL;
     ArrayInitWithArena(remap, scratchArena, ArrayCount(vertices));
     ArrayResize(remap, ArrayCount(vertices));
@@ -45,7 +74,7 @@ static void AppendMesh(resource_t *meshResource, vertex_t *vertices, memory_aren
 
     meshopt_remapIndexBuffer(indices, indices, ArrayCount(indices), remap);
     ArrayResize(vertices, uniqueVertices);
-    
+
     meshopt_optimizeVertexCache(indices, indices, ArrayCount(indices), ArrayCount(vertices));
     meshopt_optimizeVertexFetch(vertices, indices, ArrayCount(indices), vertices, ArrayCount(vertices), sizeof(vertex_t));
 
@@ -83,7 +112,7 @@ static void AppendMesh(resource_t *meshResource, vertex_t *vertices, memory_aren
     mesh.textureIndex = SDL_rand(3);
 
     f32 lodScale = meshopt_simplifyScale(&positions[0].X, ArrayCount(vertices), sizeof(vec3_t));
-    
+
     u32 *lodIndices = indices;
 
     f32 lodError = 0.0f;
@@ -94,7 +123,7 @@ static void AppendMesh(resource_t *meshResource, vertex_t *vertices, memory_aren
 
         lod->indexOffset = ArrayCount(gResourceSystem->indices);
         lod->indexCount  = ArrayCount(lodIndices);
-        
+
         ArrayPushArray(gResourceSystem->indices, lodIndices, lod->indexCount);
         lod->error = lodError * lodScale;
 
@@ -105,7 +134,7 @@ static void AppendMesh(resource_t *meshResource, vertex_t *vertices, memory_aren
             size_t nextIndicesTarget = ((size_t)((double)(ArrayCount(lodIndices)) * 0.6) / 3) * 3;
             f32 nextError = 0.0f;
 
-            size_t nextIndices = meshopt_simplifyWithAttributes(lodIndices, lodIndices, ArrayCount(lodIndices), &positions[0].X, 
+            size_t nextIndices = meshopt_simplifyWithAttributes(lodIndices, lodIndices, ArrayCount(lodIndices), &positions[0].X,
                 ArrayCount(vertices), sizeof(vec3_t), &normals[0].X, sizeof(vec3_t), normalWeights, 3, NULL, nextIndicesTarget, maxError, options, &nextError);
 
             LV_ASSERT(nextIndices <= ArrayCount(lodIndices));
@@ -125,30 +154,32 @@ static void AppendMesh(resource_t *meshResource, vertex_t *vertices, memory_aren
         }
     }
 
-    meshResource->mesh.firstMeshIndex = ArrayCount(gResourceSystem->meshes);
-    meshResource->mesh.meshCount = 1;
-
     ArrayPush(gResourceSystem->meshes, mesh);
 }
 
 // TODO: Move this to its own file
-static void LoadMesh(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+static void LoadMesh(resource_t *meshResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
 {
-    resource_t *meshResource = (resource_t *)data;
     meshResource->type = RESOURCE_TYPE_MESH;
 
     vertex_t *vertices = NULL;
-    const char *path = meshResource->path;
+    u32 *indices = NULL;
 
-    fastObjMesh *obj = fast_obj_read(path);
+    fastObjMesh *obj = fast_obj_read(meshResource->path);
     if (obj) {
-        u32 index_count = 0;
+        u32 indexCount = 0;
         for (u32 i = 0; i < obj->face_count; i++) {
-            index_count += 3 * (obj->face_vertices[i] - 2);
+            indexCount += 3 * (obj->face_vertices[i] - 2);
         }
 
-        ArrayInitWithArena(vertices, permanentArena, index_count);
-        ArrayResize(vertices, index_count);
+        ArrayInitWithArena(vertices, scratchArena, indexCount);
+        ArrayResize(vertices, indexCount);
+
+        ArrayInitWithArena(indices, scratchArena, indexCount);
+        ArrayResize(indices, indexCount);
+        for (u32 i = 0; i < indexCount; i++) {
+            indices[i] = i;
+        }
 
         u32 vertex_offset = 0;
         u32 index_offset = 0;
@@ -156,7 +187,7 @@ static void LoadMesh(void *data, memory_arena_t *scratchArena, memory_arena_t *p
         for (u32 i = 0; i < obj->face_count; i++) {
             for (u32 j = 0; j < obj->face_vertices[i]; j++) {
                 fastObjIndex gi = obj->indices[index_offset + j];
-                if (j >= 3) { 
+                if (j >= 3) {
                     vertices[vertex_offset + 0] = vertices[vertex_offset - 3];
                     vertices[vertex_offset + 1] = vertices[vertex_offset - 1];
                     vertex_offset += 2;
@@ -174,17 +205,120 @@ static void LoadMesh(void *data, memory_arena_t *scratchArena, memory_arena_t *p
             }
             index_offset += obj->face_vertices[i];
         }
-        LV_ASSERT(vertex_offset == index_count);
+        LV_ASSERT(vertex_offset == indexCount);
     }
 
-    AppendMesh(meshResource, vertices, permanentArena, scratchArena);
+    AppendMesh(vertices, indices, scratchArena, permanentArena);
+
+    meshResource->mesh.firstMeshIndex = ArrayCount(gResourceSystem->meshes) - 1;
+    meshResource->mesh.meshCount      = 1;
+
     fast_obj_destroy(obj);
 }
 
-static void LoadScene(void *resource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+static void LoadVertices(vertex_t *vertices, const cgltf_primitive *prim, memory_arena_t *arena)
 {
-    resource_t *sceneResource = (resource_t *)resource;
-    //sceneResource->type = RESOURCE_TYPE_SCENE;
+    size_t vertexCount = ArrayCount(vertices);
+    f32 *scratch = NULL;
+    ArrayInitWithArena(scratch, arena, vertexCount * 4);
+    ArrayResize(scratch, vertexCount * 4);
+
+    if (const cgltf_accessor *pos = cgltf_find_accessor(prim, cgltf_attribute_type_position, 0)) {
+        LV_ASSERT(cgltf_num_components(pos->type) == 3);
+        cgltf_accessor_unpack_floats(pos, scratch, vertexCount * 3);
+
+        for (u32 j = 0; j < vertexCount; j++) {
+            vertices[j].p.X = scratch[j * 3 + 0];
+            vertices[j].p.Y = scratch[j * 3 + 1];
+            vertices[j].p.Z = scratch[j * 3 + 2];
+        }
+    }
+
+    if (const cgltf_accessor *nrm = cgltf_find_accessor(prim, cgltf_attribute_type_normal, 0)) {
+        LV_ASSERT(cgltf_num_components(nrm->type) == 3);
+        cgltf_accessor_unpack_floats(nrm, scratch, vertexCount * 3);
+
+        for (u32 j = 0; j < vertexCount; j++) {
+            vertices[j].n.X = scratch[j * 3 + 0];
+            vertices[j].n.Y = scratch[j * 3 + 1];
+            vertices[j].n.Z = scratch[j * 3 + 2];
+        }
+    }
+
+    if (const cgltf_accessor *tex = cgltf_find_accessor(prim, cgltf_attribute_type_texcoord, 0)) {
+        LV_ASSERT(cgltf_num_components(tex->type) == 2);
+        cgltf_accessor_unpack_floats(tex, scratch, vertexCount * 2);
+
+        for (u32 j = 0; j < vertexCount; j++) {
+            vertices[j].t.X = scratch[j * 2 + 0];
+            vertices[j].t.Y = scratch[j * 2 + 1];
+        }
+    }
+}
+
+static void decomposeTransform(f32 translation[3], f32 rotation[4], f32 scale[3], const f32* transform)
+{
+	f32 m[4][4] = {};
+	memcpy(m, transform, 16 * sizeof(f32));
+
+	// extract translation from last row
+	translation[0] = m[3][0];
+	translation[1] = m[3][1];
+	translation[2] = m[3][2];
+
+	// compute determinant to determine handedness
+	f32 det =
+	    m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
+	    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+	    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+
+	f32 sign = (det < 0.f) ? -1.f : 1.f;
+
+	// recover scale from axis lengths
+	scale[0] = sqrtf(m[0][0] * m[0][0] + m[0][1] * m[0][1] + m[0][2] * m[0][2]) * sign;
+	scale[1] = sqrtf(m[1][0] * m[1][0] + m[1][1] * m[1][1] + m[1][2] * m[1][2]) * sign;
+	scale[2] = sqrtf(m[2][0] * m[2][0] + m[2][1] * m[2][1] + m[2][2] * m[2][2]) * sign;
+
+	// normalize axes to get a pure rotation matrix
+	f32 rsx = (scale[0] == 0.f) ? 0.f : 1.f / scale[0];
+	f32 rsy = (scale[1] == 0.f) ? 0.f : 1.f / scale[1];
+	f32 rsz = (scale[2] == 0.f) ? 0.f : 1.f / scale[2];
+
+	f32 r00 = m[0][0] * rsx, r10 = m[1][0] * rsy, r20 = m[2][0] * rsz;
+	f32 r01 = m[0][1] * rsx, r11 = m[1][1] * rsy, r21 = m[2][1] * rsz;
+	f32 r02 = m[0][2] * rsx, r12 = m[1][2] * rsy, r22 = m[2][2] * rsz;
+
+	// "branchless" version of Mike Day's matrix to quaternion conversion
+	int qc = r22 < 0 ? (r00 > r11 ? 0 : 1) : (r00 < -r11 ? 2 : 3);
+	f32 qs1 = qc & 2 ? -1.f : 1.f;
+	f32 qs2 = qc & 1 ? -1.f : 1.f;
+	f32 qs3 = (qc - 1) & 2 ? -1.f : 1.f;
+
+	f32 qt = 1.f - qs3 * r00 - qs2 * r11 - qs1 * r22;
+	f32 qs = 0.5f / sqrtf(qt);
+
+	rotation[qc ^ 0] = qs * qt;
+	rotation[qc ^ 1] = qs * (r01 + qs1 * r10);
+	rotation[qc ^ 2] = qs * (r20 + qs2 * r02);
+	rotation[qc ^ 3] = qs * (r12 + qs3 * r21);
+}
+
+static u32 GetTextureIndexFromTextureView(const cgltf_texture_view *view)
+{
+    u32 result = -1;
+    const char *uri = view->texture->image->uri;
+    u64 data;
+    if (HashMapLookup(&gResourceSystem->map, uri, (u32)strlen(uri), &data)) {
+        resource_t *resource = (resource_t *)data;
+        LV_ASSERT(resource->type == RESOURCE_TYPE_TEXTURE);
+        result = resource->texture.textureIndex;
+    }
+    return result;
+}
+
+static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+{
+    sceneResource->type = RESOURCE_TYPE_MESH;
 
     cgltf_options options = {0};
     cgltf_data *data = NULL;
@@ -206,74 +340,321 @@ static void LoadScene(void *resource, memory_arena_t *scratchArena, memory_arena
         goto exit;
     }
 
+    mesh_primitive_t *primitives = NULL;
+    ArrayInitWithArena(primitives, scratchArena, data->meshes_count);
+
+    size_t primitiveMaterialCount = 0;
+    for (u32 i = 0; i < data->meshes_count; i++) {
+        primitiveMaterialCount += data->meshes[i].primitives_count;
+    }
+
+    cgltf_material **primitiveMaterials = NULL;
+    ArrayInitWithArena(primitiveMaterials, scratchArena, primitiveMaterialCount);
+
+    size_t firstMeshOffset = ArrayCount(gResourceSystem->meshes);
+
+    for (u32 i = 0; i < data->meshes_count; i++) {
+        const cgltf_mesh *mesh = &data->meshes[i];
+        size_t meshOffset = ArrayCount(gResourceSystem->meshes);
+
+        for (u32 j = 0; j < mesh->primitives_count; j++) {
+            const cgltf_primitive *prim = &mesh->primitives[j];
+            if (prim->type != cgltf_primitive_type_triangles || prim->indices == NULL){
+                continue;
+            }
+
+            vertex_t *vertices = NULL;
+            ArrayInitWithArena(vertices, scratchArena, prim->attributes[0].data->count);
+            ArrayResize(vertices, prim->attributes[0].data->count);
+            LoadVertices(vertices, prim, scratchArena);
+
+            u32 *indices = NULL;
+            ArrayInitWithArena(indices, scratchArena, prim->indices->count);
+            ArrayResize(indices, prim->indices->count);
+            cgltf_accessor_unpack_indices(prim->indices, indices, 4, ArrayCount(indices));
+
+            AppendMesh(vertices, indices, scratchArena, permanentArena);
+            ArrayPush(primitiveMaterials, prim->material);
+        }
+
+        mesh_primitive_t primitive = {0};
+        primitive.meshOffset = meshOffset;
+        primitive.meshCount  = ArrayCount(gResourceSystem->meshes) - meshOffset;
+        ArrayPush(primitives, primitive);
+    }
+
+    LV_ASSERT(ArrayCount(primitiveMaterials) + firstMeshOffset == ArrayCount(gResourceSystem->meshes));
+
+    i32 *nodeDraws = NULL;
+    ArrayInitWithArena(nodeDraws, scratchArena, data->nodes_count);
+    ArrayResize(nodeDraws, data->nodes_count);
+    for (u32 i = 0; i < ArrayCount(nodeDraws); i++) {
+        nodeDraws[i] = -1;
+    }
+
+    size_t materialOffset = ArrayCount(gResourceSystem->materials);
+
+    for (u32 i = 0; i < data->nodes_count; i++) {
+        const cgltf_node *node = &data->nodes[i];
+
+        if (node->mesh) {
+            f32 matrix[16];
+            cgltf_node_transform_world(node, matrix);
+
+            f32 translation[3];
+            f32 rotation[4];
+            f32 scale[3];
+            decomposeTransform(translation, rotation, scale, matrix);
+
+            mesh_primitive_t range = primitives[cgltf_mesh_index(data, node->mesh)];
+
+            for (u32 j = 0; j < range.meshCount; j++) {
+                draw_data_t draw    = {0};
+                draw.position    = (vec3_t){ translation[0], translation[1], translation[2] };
+                draw.scale       = MAX(scale[0], MAX(scale[1], scale[2]));
+                draw.rx          = rotation[0];
+                draw.ry          = rotation[1];
+                draw.rz          = rotation[2];
+                draw.rw          = rotation[3];
+                draw.meshIndex   = range.meshOffset + j;
+
+                cgltf_material *material = primitiveMaterials[range.meshOffset + j - firstMeshOffset];
+                if (!material) {
+                    LOGE("No material associated with this mesh");
+                }
+                draw.materialIndex = material ? materialOffset +  (i32)(cgltf_material_index(data, material)) : 0;
+
+                if (material && material->alpha_mode != cgltf_alpha_mode_opaque) {
+                    draw.postPass = 1;
+                }
+
+                if (material && material->has_transmission) {
+                    draw.postPass = 2;
+                }
+
+                nodeDraws[i] = (i32)ArrayCount(gResourceSystem->meshDraws);
+                ArrayPush(gResourceSystem->meshDraws, draw);
+            }
+        }
+    }
+
+    for (u32 i = 0; i < data->materials_count; i++) {
+        cgltf_material *material = &data->materials[i];
+
+        material_t mat = {0};
+        mat.diffuseFactor = (vec4_t){1,1,1,1};
+
+        if (material->has_pbr_specular_glossiness) {
+            if  (material->pbr_specular_glossiness.diffuse_texture.texture) {
+                mat.albedo = GetTextureIndexFromTextureView(&material->pbr_specular_glossiness.diffuse_texture);
+            }
+            float *diffuseFactor = material->pbr_specular_glossiness.diffuse_factor;
+            mat.diffuseFactor = HMM_V4(diffuseFactor[0], diffuseFactor[1], diffuseFactor[2], diffuseFactor[3]);
+
+            if (material->pbr_specular_glossiness.specular_glossiness_texture.texture) {
+                mat.specular = GetTextureIndexFromTextureView(&material->pbr_specular_glossiness.specular_glossiness_texture);
+            }
+            mat.specularFactor = HMM_V4(material->pbr_specular_glossiness.specular_factor[0], material->pbr_specular_glossiness.specular_factor[1], material->pbr_specular_glossiness.specular_factor[2], material->pbr_specular_glossiness.glossiness_factor);
+        } else if (material->has_pbr_metallic_roughness) {
+            if (material->pbr_metallic_roughness.base_color_texture.texture) {
+                mat.albedo = GetTextureIndexFromTextureView(&material->pbr_metallic_roughness.base_color_texture);
+            }
+            float *baseColorFactor = material->pbr_metallic_roughness.base_color_factor;
+            mat.diffuseFactor = HMM_V4(baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]);
+
+            if (material->pbr_metallic_roughness.metallic_roughness_texture.texture) {
+                mat.specular = GetTextureIndexFromTextureView(&material->pbr_metallic_roughness.metallic_roughness_texture);
+            }
+            mat.specularFactor = (vec4_t){ 1 , 1, 1, 1 - material->pbr_metallic_roughness.roughness_factor };
+        }
+
+        if (material->normal_texture.texture) {
+            mat.normal = GetTextureIndexFromTextureView(&material->normal_texture);
+        }
+
+        if (material->emissive_texture.texture) {
+            mat.emissive = GetTextureIndexFromTextureView(&material->emissive_texture);
+        }
+        mat.emissiveFactor = (vec3_t){ material->emissive_factor[0], material->emissive_factor[1], material->emissive_factor[2] };
+        ArrayPush(gResourceSystem->materials, mat);
+    }
+
+    cgltf_animation_sampler** samplersT = NULL;
+    ArrayInitWithArena(samplersT, scratchArena, data->nodes_count);
+    ArrayResize(samplersT, data->nodes_count);
+
+    cgltf_animation_sampler** samplersR = NULL;
+    ArrayInitWithArena(samplersR, scratchArena, data->nodes_count);
+    ArrayResize(samplersR, data->nodes_count);
+
+    cgltf_animation_sampler** samplersS = NULL;
+    ArrayInitWithArena(samplersS, scratchArena, data->nodes_count);
+    ArrayResize(samplersS, data->nodes_count);
+
+    for (u32 i = 0; i < data->animations_count; i++) {
+        cgltf_animation *anim = &data->animations[i];
+        
+        for (u32 j = 0; j < anim->channels_count; j++) {
+            cgltf_animation_channel *channel = &anim->channels[j];
+            cgltf_animation_sampler *sampler = channel->sampler;
+
+            if (!channel->target_node) {
+                continue;
+            }
+
+            if (channel->target_path == cgltf_animation_path_type_translation) {
+                samplersT[cgltf_node_index(data, channel->target_node)] = sampler;
+            } else if (channel->target_path == cgltf_animation_path_type_rotation) {
+                samplersR[cgltf_node_index(data, channel->target_node)] = sampler;
+            } else if (channel->target_path == cgltf_animation_path_type_scale) {
+                samplersS[cgltf_node_index(data, channel->target_node)] = sampler;
+            }
+        }
+    }
+
+    for (u32 i = 0; i < data->nodes_count; i++) {
+        if (!samplersR[i] && !samplersT[i] && !samplersS[i]) {
+            continue;
+        }
+
+        if (nodeDraws[i] == -1) {
+            LOGW("Warning: skipping animation for node %u without draw", i);
+            continue;
+        }
+
+        cgltf_accessor *input = 0;
+        if (samplersT[i]) {
+            input = samplersT[i]->input;
+        } else if (samplersR[i]) {
+            input = samplersR[i]->input;
+        } else if (samplersS[i]) {
+            input = samplersS[i]->input;
+        }
+
+        if ((samplersT[i] && samplersT[i]->input->count != input->count) ||
+            (samplersR[i] && samplersR[i]->input->count != input->count) ||
+            (samplersS[i] && samplersS[i]->input->count != input->count)) {
+            LOGW("Warning: skipping animation for node %u due to mismatched sampler counts", i);
+            continue;
+        }
+
+		if ((samplersT[i] && samplersT[i]->interpolation != cgltf_interpolation_type_linear) ||
+		    (samplersR[i] && samplersR[i]->interpolation != cgltf_interpolation_type_linear) ||
+		    (samplersS[i] && samplersS[i]->interpolation != cgltf_interpolation_type_linear))
+		{
+			LOGW("Warning: skipping animation for node %u due to mismatched sampler counts", i);
+			continue;
+		}
+
+        if (input->count < 2) {
+			LOGW("Warning: skipping animation for node %u with %d keyframes", i, (u32)input->count);
+            continue;
+        }
+
+        f32 *times = NULL;
+        ArrayInitWithArena(times, scratchArena, input->count);
+        ArrayResize(times, input->count);
+        cgltf_accessor_unpack_floats(input, times, ArrayCount(times));
+
+        animation_t animation = {0};
+        animation.drawIndex = nodeDraws[i];
+        animation.startTime = times[0];
+        animation.period = times[1] - times[0];
+        ArrayInitWithArena(animation.keyframes, permanentArena, input->count);
+    
+        f32 *valuesR, *valuesT, *valuesS;
+
+        if (samplersT[i]) {
+            ArrayInitWithArena(valuesT, scratchArena, samplersT[i]->output->count * 3);
+            ArrayResize(valuesT, samplersT[i]->output->count * 3);
+            cgltf_accessor_unpack_floats(samplersT[i]->output, valuesT, ArrayCount(valuesT));
+        }
+
+        if (samplersR[i]) {
+            ArrayInitWithArena(valuesR, scratchArena, samplersR[i]->output->count * 4);
+            ArrayResize(valuesR, samplersR[i]->output->count * 4);
+            cgltf_accessor_unpack_floats(samplersR[i]->output, valuesR, ArrayCount(valuesR));
+        }
+
+        if (samplersS[i]) {
+            ArrayInitWithArena(valuesS, scratchArena, samplersS[i]->output->count * 3);
+            ArrayResize(valuesS, samplersS[i]->output->count * 3);
+            cgltf_accessor_unpack_floats(samplersS[i]->output, valuesS, ArrayCount(valuesS));
+        }
+
+        cgltf_node nodeCopy = data->nodes[i];
+
+        for (u32 j = 0; j < input->count; j++) {
+            if (samplersT[i]) {
+                memcpy(nodeCopy.translation, &valuesT[j * 3], 3 * sizeof(f32));
+            }
+            
+            if (samplersR[i]) {
+                memcpy(nodeCopy.rotation, &valuesR[j * 4], 4 * sizeof(f32));
+            }
+
+            if (samplersS[i]) {
+                memcpy(nodeCopy.scale, &valuesS[j * 3], 3 * sizeof(f32));
+            }
+            
+            f32 matrix[16];
+            cgltf_node_transform_world(&nodeCopy, matrix);
+
+            f32 translation[3];
+            f32 rotation[4];
+            f32 scale[3];
+            decomposeTransform(translation, rotation, scale, matrix);
+
+            keyframe_t kf = {0};
+            kf.translation = (vec3_t){ translation[0], translation[1], translation[2] };
+            kf.rotation = (quat_t){ rotation[0], rotation[1], rotation[2], rotation[3] };
+            kf.scale = MAX(scale[0], MAX(scale[1], scale[2]));
+
+            ArrayPush(animation.keyframes, kf);
+        }
+
+        ArrayPush(gResourceSystem->animations, animation);
+    }
 exit:
     cgltf_free(data);
 }
 
-static void LoadShader(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+static void LoadShader(resource_t *shaderResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
 {
-    resource_t *shaderResource = (resource_t *)data;
     shaderResource->type = RESOURCE_TYPE_SHADER;
-
     VulkanLoadShader(shaderResource, shaderResource->path, scratchArena, permanentArena);
 }
 
-static resource_type_t GetResourceType(const char *path)
+static resource_type_t GetResourceType(const char *fName)
 {
-    const char *extension = StringUtilsGetExtensionFromPath(path);
+    const char *extension = StringUtilsGetExtensionFromPath(fName);
+    if (*extension == '\0') {
+        //It's a directory
+        return RESOURCE_TYPE_INVALID;
+    }
+
     if (strncmp(extension, "spv", 3) == 0) {
         return RESOURCE_TYPE_SHADER;
-    } else if (strncmp(extension, "obj", 3) == 0) {
-        return RESOURCE_TYPE_MESH;
-    } else if (strncmp(extension, "ktx", 3) == 0) {
+    } else if (strncmp(extension, "dds", 3) == 0) {
         return RESOURCE_TYPE_TEXTURE;
     } else if (strncmp(extension, "gltf", 4) == 0) {
         return RESOURCE_TYPE_MESH;
-    } 
+    }
     return RESOURCE_TYPE_INVALID;
 }
 
-static const char *GetSubDirFromType(resource_type_t type)
+static void ResourceSystemLoadResource(resource_t *resources, const char *uri, resource_type_t type)
 {
-    const char *dir = NULL;
-    if (type == RESOURCE_TYPE_SHADER) {
-        dir = "shaders/";
-    } else if (type == RESOURCE_TYPE_MESH) {
-        dir = "meshes/";
-    } else if (type == RESOURCE_TYPE_TEXTURE) {
-        dir = "textures/";
-    } else {
-        LOGF("Unknown resource type");
-        return NULL;
-    }
-    return dir;
-}
-
-static const char *GetFullPathFromName(const char *name, resource_type_t type, memory_arena_t *arena)
-{
-    const char *dir = GetSubDirFromType(type);
-    return StringIntern(ArenaPrintf(arena, "%s%s%s", gResourceSystem->assetDir, dir, name));
-}
-
-static void ResourceSystemLoadResource(resource_t *resources, const char *fileName)
-{
-    SDL_LockMutex(gResourceSystem->mutex);
-
     resource_t resource = {0};
-    resource.type = GetResourceType(fileName);
-    if (resource.type == RESOURCE_TYPE_INVALID) {
-        LOGE("Unknown resource type");
-        return;
-    }
+    resource.type = type;
+    resource.path = GetFullPathFromUri(uri, type, ScratchArena(0));
 
-    resource.path = GetFullPathFromName(fileName, resource.type, ScratchArena(0));
-
-    void (*LoadFn)(void *, memory_arena_t *, memory_arena_t *arena);
+    void (*LoadFn)(resource_t *, memory_arena_t *, memory_arena_t *);
 
     switch(resource.type) {
         case RESOURCE_TYPE_MESH:
-            gResourceSystem->meshCount++; 
-            LoadFn = LoadMesh;
+            gResourceSystem->meshCount++;
+            LoadFn = LoadScene;
             break;
         case RESOURCE_TYPE_SHADER:
             gResourceSystem->shaderCount++;
@@ -283,29 +664,26 @@ static void ResourceSystemLoadResource(resource_t *resources, const char *fileNa
             gResourceSystem->textureCount++;
             LoadFn = LoadTexture;
             break;
+        default:
+            LV_ASSERT(false);
+            break;
     }
 
     u64 data = 0;
     if (!HashMapLookup(&gResourceSystem->map, resource.path, (u32)strlen(resource.path), &data)) {
         ArrayPush(resources, resource);
         resource_t *resourceData = ArrayBack(resources);
-        PushJob(LoadFn, resourceData);
+        LoadFn(resourceData, ScratchArena(0), PermanentArena(0));
 
         data = (u64)resourceData;
         HashMapSet(&gResourceSystem->map, resource.path, (u32)strlen(resource.path), data);
     } else {
         LOGW("Resource at %s already loaded!", resource.path);
     }
-    SDL_UnlockMutex(gResourceSystem->mutex);
 }
 
-static void LoadResources(resource_t *resources, const char *assetDir, const char *pattern, memory_arena_t *arena)
+static void LoadResources(resource_t *resources, const char *assetDir, resource_type_t type, memory_arena_t *arena)
 {
-    resource_type_t type = GetResourceType(pattern);
-    if (type == RESOURCE_TYPE_INVALID) {
-        LOGF("Unknown resource type");
-        return;
-    }
     const char *subDir = GetSubDirFromType(type);
     if (!subDir) {
         return;
@@ -314,13 +692,18 @@ static void LoadResources(resource_t *resources, const char *assetDir, const cha
     const char *dir = ArenaPrintf(arena, "%s%s", assetDir, subDir);
 
     i32 count = 0;
-    char **glob = SDL_GlobDirectory(dir, pattern, 0, &count);
+    char **glob = SDL_GlobDirectory(dir, NULL, SDL_GLOB_CASEINSENSITIVE, &count);
+
     if (!glob) {
         LOGE("Failed to enumerate directory: %s", assetDir);
+        return;
     }
 
     for (u32 i = 0; i < count; i++) {
-        ResourceSystemLoadResource(resources, glob[i]);
+        //skip directories
+        if (GetResourceType(glob[i]) == type) {
+            ResourceSystemLoadResource(resources, glob[i], type);
+        }
     }
     SDL_free(glob);
 }
@@ -330,11 +713,6 @@ void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
     gResourceSystem = resourceSystem;
 
     HashMapInitWithArena(&resourceSystem->map, PermanentArena(0), resourceCapacity);
-    resourceSystem->mutex = SDL_CreateMutex();
-    if (!resourceSystem->mutex) {
-        LOGF("Unable to initialize resource system mutex");
-        return;
-    }
 
     const char *basePath = SDL_GetBasePath();
     gResourceSystem->assetDir = StringIntern(ArenaPrintf(ScratchArena(0), "%s%s", basePath, "assets/"));
@@ -344,12 +722,13 @@ void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
     ArrayInitWithArena(gResourceSystem->vertices, PermanentArena(0), MAX_VERTICES);
     ArrayInitWithArena(gResourceSystem->indices, PermanentArena(0), MAX_INDICES);
     ArrayInitWithArena(gResourceSystem->meshes, PermanentArena(0), MAX_MESHES);
+    ArrayInitWithArena(gResourceSystem->materials, PermanentArena(0), MAX_MATERIALS);
+    ArrayInitWithArena(gResourceSystem->meshDraws, PermanentArena(0), MAX_MESH_DRAWS);
+    ArrayInitWithArena(gResourceSystem->animations, PermanentArena(0), MAX_ANIMATIONS);
 
-    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, "*.spv", PermanentArena(0));
-    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, "*.obj", PermanentArena(0));
-    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, "*.ktx", PermanentArena(0));
-
-    WaitForAllJobs();
+    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, RESOURCE_TYPE_TEXTURE, PermanentArena(0));
+    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, RESOURCE_TYPE_SHADER, PermanentArena(0));
+    LoadResources(gResourceSystem->resources, gResourceSystem->assetDir, RESOURCE_TYPE_MESH, PermanentArena(0));
 }
 
 void ResourceSystemShutdown(void)
@@ -357,19 +736,20 @@ void ResourceSystemShutdown(void)
     for (u32 i = 0; i < ArrayCount(gResourceSystem->resources); i++) {
         resource_t *resource = &gResourceSystem->resources[i];
         switch(resource->type) {
-            case RESOURCE_TYPE_MESH: 
+            case RESOURCE_TYPE_MESH:
                 break;
             case RESOURCE_TYPE_SHADER:
                 break;
             case RESOURCE_TYPE_TEXTURE:
                 VulkanUnloadTexture(resource);
                 break;
+            default:
+                LV_ASSERT(false);
+                break;
         }
     }
 
     HashMapFree(&gResourceSystem->map);
-    SDL_DestroyMutex(gResourceSystem->mutex);
-
     gResourceSystem = NULL;
 }
 
@@ -378,9 +758,9 @@ void ResourceSystemHotReload(resource_system_t *resourceSystem)
     gResourceSystem = resourceSystem;
 }
 
-const resource_t *ResourceSystemGetResource(const char *fileName)
+const resource_t *ResourceSystemGetResource(const char *uri)
 {
-    const char *fullPath = GetFullPathFromName(fileName, GetResourceType(fileName), ScratchArena(0));
+    const char *fullPath = GetFullPathFromUri(uri, GetResourceType(uri), ScratchArena(0));
     u64 data = 0;
     if (!HashMapLookup(&gResourceSystem->map, fullPath, strlen(fullPath), &data)) {
         LOGE("Unable to find resource %s", fullPath);
@@ -409,4 +789,3 @@ const geometry_t ResourceSystemGetGeometry(void)
     geometry.meshes = gResourceSystem->meshes;
     return geometry;
 }
-

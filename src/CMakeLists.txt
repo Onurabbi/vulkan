@@ -15,7 +15,6 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # This assumes the SDL source is available in extern/SDL
 add_subdirectory(extern/SDL EXCLUDE_FROM_ALL)
-add_subdirectory(extern/KTX-Software/lib EXCLUDE_FROM_ALL)
 set(MESHOPT_BUILD_SHARED_LIBS ON)
 add_subdirectory(extern/meshoptimizer EXCLUDE_FROM_ALL)
 
@@ -45,8 +44,8 @@ foreach(SLANG_FILE ${SLANG_SOURCE_FILES})
     list(APPEND SPIRV_BINARY_FILES ${SPIRV_FILE_ABS})
 endforeach()
 
-file(GLOB_RECURSE ASSET_FILES "${ASSET_SOURCE_DIR}/meshes/*.obj"
-                              "${ASSET_SOURCE_DIR}/textures/*.ktx")
+file(GLOB_RECURSE ASSET_FILES "${ASSET_SOURCE_DIR}/meshes/*"
+                              "${ASSET_SOURCE_DIR}/textures/*")
 
 set(COPIED_ASSET_FILES "")
 foreach(ASSET_FILE ${ASSET_FILES})
@@ -79,7 +78,7 @@ add_library(Game SHARED "game.c"
                         "vulkan/vma.cpp"
                         "vulkan/volk.c")
 
-target_link_libraries(Game PRIVATE SDL3::SDL3 ktx meshoptimizer)
+target_link_libraries(Game PRIVATE SDL3::SDL3 meshoptimizer)
 target_include_directories(Game PRIVATE "extern" $ENV{VULKAN_SDK}/include)
 
 add_custom_target(compile_shaders DEPENDS ${SPIRV_BINARY_FILES})

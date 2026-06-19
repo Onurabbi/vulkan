@@ -114,7 +114,7 @@ extern void __cdecl __debugbreak(void);
 #define lv_debug_break() ((void*)0=0)
 #endif
 
-LV_EXPORT void ReportAssertionFailure(const char *expr);
+LV_EXPORT void ReportAssertionFailure(const char *expr, const char *fn, i32 line);
 
 #ifdef LV_ASSERTIONS_ENABLED
 
@@ -122,7 +122,7 @@ LV_EXPORT void ReportAssertionFailure(const char *expr);
 do                                            \
 {                                             \
 if (!(expr)) {                                \
-ReportAssertionFailure(#expr);                \
+ReportAssertionFailure(#expr, __FUNCTION__, __LINE__);                \
 lv_debug_break();                             \
 }                                             \
 } while(0)

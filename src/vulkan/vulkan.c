@@ -4,6 +4,7 @@
 #include "texture.h"
 #include "vma.h"
 #include "volk.h"
+#include "vulkan/vulkan_core.h"
 #include "vulkan_types.h"
 
 #include "../platform.h"
@@ -15,9 +16,6 @@
 #include <stdio.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
-
-#include <ktx.h>
-#include <ktxvulkan.h>
 
 #define OG_DS_IMPLEMENTATION
 #include "../og_ds.h"
@@ -192,19 +190,19 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     geometry_t geometry = ResourceSystemGetGeometry();
 
     VkDeviceSize vBufSize = sizeof(vertex_t) * ArrayCount(geometry.vertices);
-    CreateBuffer(&ctx->vertexBuffer, 
+    CreateBuffer(&ctx->vertexBuffer,
         ctx->device,
-        vBufSize, 
+        vBufSize,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VMA_MEMORY_USAGE_AUTO, 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
         VMA_ALLOCATION_CREATE_MAPPED_BIT,
         ctx->allocator);
     UploadBuffer(&ctx->vertexBuffer, geometry.vertices, vBufSize, 0);
 
     VkDeviceSize iBufSize = sizeof(u32) * ArrayCount(geometry.indices);
-    CreateBuffer(&ctx->indexBuffer, 
+    CreateBuffer(&ctx->indexBuffer,
         ctx->device,
         iBufSize,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -232,13 +230,13 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         CreateBuffer(&ctx->shaderGlobalsBuffers[i],
             ctx->device,
-            sizeof(globals_t), 
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
-            VMA_MEMORY_USAGE_AUTO, 
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+            sizeof(globals_t),
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VMA_MEMORY_USAGE_AUTO,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
             VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            ctx->allocator);    
+            ctx->allocator);
     }
 
     ctx->drawCount = 25000;
@@ -246,7 +244,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
 
     memory_arena_t *arena = PermanentArena(0);
     draw_data_t *draws = NULL;
-    
+
     ArrayInitWithArena(draws, arena, ctx->drawCount);
     ArrayResize(draws, ctx->drawCount);
 
@@ -255,7 +253,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         draw->position.X = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
         draw->position.Y = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
         draw->position.Z = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
-        draw->scale = (f32)(SDL_randf()) + 1; 
+        draw->scale = (f32)(SDL_randf()) + 1;
         draw->scale *= 2.0f;
         draw->meshIndex = SDL_rand(ArrayCount(geometry.meshes));
 
@@ -275,7 +273,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         draw->rw = orientation.W;
     }
 
-    CreateBuffer(&ctx->drawBuffer, 
+    CreateBuffer(&ctx->drawBuffer,
         ctx->device,
         sizeof(draw_data_t) * ctx->drawCount,
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -286,24 +284,24 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         ctx->allocator);
 
     UploadBuffer(&ctx->drawBuffer, draws, sizeof(draw_data_t) * ctx->drawCount, 0);
-    
+
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        CreateBuffer(&ctx->drawCommandBuffers[i], 
+        CreateBuffer(&ctx->drawCommandBuffers[i],
             ctx->device,
-            ctx->drawCount * sizeof(draw_command_t), 
-            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
-            VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 
+            ctx->drawCount * sizeof(draw_command_t),
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+            VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
             0,
             ctx->allocator);
     }
 
-    CreateBuffer(&ctx->drawCommandCountBuffer, 
+    CreateBuffer(&ctx->drawCommandCountBuffer,
         ctx->device,
-        sizeof(u32), 
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, 
-        VMA_MEMORY_USAGE_AUTO, 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | 
+        sizeof(u32),
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
         VMA_ALLOCATION_CREATE_MAPPED_BIT,
         ctx->allocator
     );
@@ -358,6 +356,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
 
     VkDescriptorImageInfo *textureDescriptors = NULL;
     ArrayInitWithArena(textureDescriptors, ScratchArena(0), texCount);
+
     for (u32 i = 0; i < texCount; i++) {
         VkDescriptorImageInfo info = {0};
         info.imageLayout = textureResources[i]->texture.layout;
@@ -391,7 +390,7 @@ void VulkanRender(void)
 
     u32 imageIndex;
     VK_CHECK(vkAcquireNextImageKHR(gCtx->device, gCtx->swapchain, UINT64_MAX, gCtx->presentSemaphores[gCtx->frameIndex], VK_NULL_HANDLE, &imageIndex));
-    
+
     f32 znear = 0.1f;
     f32 zfar = 256.0f;
 
@@ -425,18 +424,18 @@ void VulkanRender(void)
     };
 
     VK_CHECK(vkBeginCommandBuffer(cb, &cbBI));
-    
+
     StageBarrier(cb, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, 
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
     );
 
     vkCmdFillBuffer(cb, gCtx->drawCommandCountBuffer.buffer, 0, sizeof(u32), 0);
 
     StageBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_2_MEMORY_WRITE_BIT, 
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
+        VK_ACCESS_2_MEMORY_WRITE_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
     );
 
@@ -450,7 +449,7 @@ void VulkanRender(void)
         VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         VK_IMAGE_ASPECT_COLOR_BIT,
         0, 1);
-    
+
     VkImageMemoryBarrier2 depthBarrier = ImageBarrier(gCtx->depthImage.image,
         VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -462,7 +461,7 @@ void VulkanRender(void)
         0, 1);
 
     VkImageMemoryBarrier2 outputBarriers[] = {colorBarrier, depthBarrier};
-    
+
     VkDependencyInfo barrierDependencyInfo = {
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .imageMemoryBarrierCount = 2,
@@ -505,13 +504,13 @@ void VulkanRender(void)
     vkCmdPushConstants(cb, gCtx->computePipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
     u32 numWorkgroups = (gCtx->drawCount + 63) / 64;
     vkCmdDispatch(cb, numWorkgroups, 1, 1);
-    
+
     // Synchronize compute shader write with draw indirect read
-    StageBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
+    StageBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 
+        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
         VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
-    
+
     vkCmdBeginRendering(cb, &renderingInfo);
 
     VkViewport vp = {
@@ -532,7 +531,7 @@ void VulkanRender(void)
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetTex, 0, NULL);
 
-    VkDeviceSize vOffset = 0;        
+    VkDeviceSize vOffset = 0;
     vkCmdBindVertexBuffers(cb, 0, 1, &gCtx->vertexBuffer.buffer, &vOffset);
     vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
@@ -549,8 +548,8 @@ void VulkanRender(void)
         .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         .image = gCtx->swapchainImages[imageIndex].image,
-        .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, 
-        .subresourceRange.levelCount = 1, 
+        .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .subresourceRange.levelCount = 1,
         .subresourceRange.layerCount = 1,
     };
 
@@ -597,7 +596,7 @@ void VulkanRender(void)
         gCtx->windowResized = false;
 
         VK_CHECK(vkDeviceWaitIdle(gCtx->device));
-    
+
         VkSurfaceCapabilitiesKHR surfaceCaps;
         VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gCtx->physicalDevice, gCtx->window.surface, &surfaceCaps));
 
@@ -715,7 +714,7 @@ void VulkanInit(vulkan_context_t *ctx)
             printf("Selecting queue family %u\n", i);
             ctx->queueFamily = i;
             break;
-        }  
+        }
     }
 
     if (!PlatformGetVulkanPresentationSupport(ctx->instance, ctx->physicalDevice, ctx->queueFamily)) {
@@ -792,7 +791,7 @@ void VulkanInit(vulkan_context_t *ctx)
         .pVulkanFunctions = &vkFunctions,
         .instance = ctx->instance,
     };
-    
+
     VK_CHECK(vmaImportVulkanFunctionsFromVolk(&allocatorCI, &vkFunctions));
     VK_CHECK(vmaCreateAllocator(&allocatorCI, &ctx->allocator));
 
@@ -860,18 +859,18 @@ void VulkanInit(vulkan_context_t *ctx)
     }
 
     LV_ASSERT(depthFormat != VK_FORMAT_UNDEFINED);
-    
+
     VmaAllocation depthAllocation;
     ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, ctx->window.w, ctx->window.h, 1, &depthAllocation);
     ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;
- 
-    CreateBuffer(&ctx->scratchBuffer, 
+
+    CreateBuffer(&ctx->scratchBuffer,
         ctx->device,
-        128 * 1024 * 1024, 
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
-        VMA_MEMORY_USAGE_AUTO, 
+        128 * 1024 * 1024,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_MEMORY_USAGE_AUTO,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
         ctx->allocator);
 
@@ -900,7 +899,7 @@ void VulkanInit(vulkan_context_t *ctx)
     };
 
     VK_CHECK(vkCreateCommandPool(ctx->device, &commandPoolCI, NULL, &ctx->commandPool));
- 
+
     VkCommandBufferAllocateInfo cbAllocInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = ctx->commandPool,

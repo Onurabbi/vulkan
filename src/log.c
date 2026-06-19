@@ -58,7 +58,7 @@ void LogOutput(i32 severity, const char *format, ...)
     fflush(stderr);
 }
 
-LV_EXPORT void ReportAssertionFailure(const char *expr)
+LV_EXPORT void ReportAssertionFailure(const char *expr, const char *fn, i32 line)
 {
-    LogOutput(FATAL, "[%s:%u] Assertion Failed: %s\n", __FUNCTION__, __LINE__, expr);
+    LogOutput(FATAL, "[%s:%d] Assertion Failed: %s\n", fn, line, expr);
 }

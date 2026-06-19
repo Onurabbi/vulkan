@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "platform.h"
+#include "log.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -52,7 +53,8 @@ do { \
     if ((newCount) > ArrayCapacity((arr))) { \
         if (ArrayArena((arr))) { \
             /*fail, we don't support growing arrays that use memory arenas since they can't be reallocated*/ \
-            LV_ASSERT(false && "Array is full and uses a memory arena, we don't support growing arrays"); \
+            LOGF("Array is full and uses a  memory arena. Count: %u, Capacity: %u", newCount, ArrayCapacity((arr))); \
+            LV_ASSERT(false); \
         } else { \
             (arr) = ArrayGrow((arr), sizeof(*(arr)), newCount); \
         } \

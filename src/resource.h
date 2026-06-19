@@ -29,6 +29,7 @@ typedef struct {
     VkImageView view;
     VkSampler sampler;
     VkImageLayout layout;
+    u32 textureIndex;
 } texture_resource_t;
 
 typedef enum {
@@ -49,19 +50,22 @@ typedef struct {
 } resource_t;
 
 typedef struct {
-    SDL_Mutex *mutex;
     const char *assetDir;
-    hash_map_t map; 
+    hash_map_t map;
 
     resource_t *resources;
-    
-    // geometry storage. this could be temporary?
-    vertex_t *vertices; 
-    u32      *indices;
-    mesh_t   *meshes;
 
+    // geometry storage. this could be temporary?
+    vertex_t    *vertices;
+    u32         *indices;
+    material_t  *materials;
+    mesh_t      *meshes;
+    draw_data_t *meshDraws;
+    animation_t *animations;
+    
     u32 sceneCount;
     u32 meshCount;
+    u32 materialCount;
     u32 shaderCount;
     u32 textureCount;
 } resource_system_t;

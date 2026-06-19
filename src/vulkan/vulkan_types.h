@@ -19,6 +19,19 @@
 typedef struct SDL_Window SDL_Window;
 
 typedef struct {
+    vec3_t translation;
+    f32 scale;
+    quat_t rotation;
+} keyframe_t;
+
+typedef struct {
+    u32 drawIndex;
+    f32 startTime;
+    f32 period;
+    keyframe_t *keyframes;
+} animation_t;
+
+typedef struct {
     VkImage image;
     VkImageView view;
     VkFormat format;
@@ -47,7 +60,7 @@ typedef struct {
     vec4_t diffuseFactor;
     vec4_t specularFactor;
     vec3_t emissiveFactor;
-    
+
     u32 padding;
 } material_t;
 
@@ -78,6 +91,8 @@ typedef struct {
     vec3_t position;
     f32 scale;
     u32 meshIndex;
+    u32 materialIndex;
+    u32 postPass;
 } draw_data_t;
 
 typedef struct {

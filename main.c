@@ -359,13 +359,13 @@ int main(int argc, char *argv[])
     arenaCount = threadCount + 1;
 
     for (u32 i = 1; i < arenaCount; i++) {
-        ARENA_BOOTSTRAP(ptr, PermanentArena(i), PERMANENT_ARENA_CAPACITY);
+        ARENA_BOOTSTRAP(ptr, PermanentArena(i), WORKER_PERMANENT_ARENA_CAPACITY);
     }
 
     scratchArenas = PushArray(PermanentArena(0), arenaCount, memory_arena_t);
-
-    for (u32 i = 0; i < arenaCount; i++) {
-        ARENA_BOOTSTRAP(ptr, &scratchArenas[i], SCRATCH_ARENA_CAPACITY);
+    ARENA_BOOTSTRAP(ptr, ScratchArena(0), MAIN_SCRATCH_ARENA_CAPACITY);
+    for (u32 i = 1; i < arenaCount; i++) {
+        ARENA_BOOTSTRAP(ptr, ScratchArena(i), WORKER_SCRATCH_ARENA_CAPACITY);
     }
 
     ARENA_BOOTSTRAP(ptr, &stringArena, STRING_ARENA_CAPACITY);
