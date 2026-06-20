@@ -1,4 +1,4 @@
-#include "mesh.h"
+#include "mesh.glsl"
 
 [[vk::push_constant]] ShaderData shaderData;
 
@@ -36,12 +36,15 @@ void main(uint3 id : SV_DispatchThreadId)
     if (visible) {
         uint dci = __atomic_add(shaderData.drawCommandCount[0], 1);
 
-        // Calculate LOD based on distance relative to the object's radius (approximate screen size).
-        // lodScale controls how aggressively LODs drop. Higher value = stays high-detail further away.
-        float lodScale = 5.0f; // Tip: You can pass this via globals to tweak it at runtime!
-        float dist = max(0.0f, distance(center, float3(0)) - radius);
-        float lodTarget = log2(max(1.0f, dist / max(0.001f, radius * lodScale)));
-        uint lodIndex = clamp(int(lodTarget), 0, int(mesh.lodCount) - 1);
+        uint lodIndex = 0;
+        float distance = max(length(center) - radius, 0);
+        float threshold = distance * globals.lodTarget / meshDraw.scale;
+
+        for (uint i = 0; i < mesh.lodCount; i++) {
+            if (mesh.meshLods[i].error < threshold) {
+                lodIndex = i;
+            }
+        }
 
         MeshLod lod = mesh.meshLods[lodIndex];
 

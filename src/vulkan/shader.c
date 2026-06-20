@@ -300,10 +300,11 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
     };
 
-    VkVertexInputAttributeDescription vertexAttributes[3] = {
+    VkVertexInputAttributeDescription vertexAttributes[4] = {
         {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,p)},
         {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,n)},
-        {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(vertex_t,t)}
+        {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,t)},
+        {.location = 3, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(vertex_t,uv)}
     };
 
     VkPipelineVertexInputStateCreateInfo vertexInputState = {

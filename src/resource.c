@@ -250,8 +250,8 @@ static void LoadVertices(vertex_t *vertices, const cgltf_primitive *prim, memory
         cgltf_accessor_unpack_floats(tex, scratch, vertexCount * 2);
 
         for (u32 j = 0; j < vertexCount; j++) {
-            vertices[j].t.X = scratch[j * 2 + 0];
-            vertices[j].t.Y = scratch[j * 2 + 1];
+            vertices[j].uv.X = scratch[j * 2 + 0];
+            vertices[j].uv.Y = scratch[j * 2 + 1];
         }
     }
 }
@@ -787,5 +787,8 @@ const geometry_t ResourceSystemGetGeometry(void)
     geometry.indices = gResourceSystem->indices;
     geometry.vertices = gResourceSystem->vertices;
     geometry.meshes = gResourceSystem->meshes;
+    geometry.materials = gResourceSystem->materials;
+    geometry.draws = gResourceSystem->meshDraws;
+
     return geometry;
 }

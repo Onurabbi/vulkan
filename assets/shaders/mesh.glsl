@@ -21,6 +21,8 @@ struct DrawData
     float3 position;
     float scale;
     uint meshIndex;
+    uint materialIndex;
+    uint postPass;
 };
 
 struct Globals {
@@ -31,6 +33,7 @@ struct Globals {
     float4 lightPos;
     uint selected;
     uint drawCount;
+    float lodTarget;
 };
 
 struct DrawCommand {
@@ -42,15 +45,21 @@ struct DrawCommand {
     uint firstInstance;
 };
 
+struct Material {
+    uint albedo;
+    uint normal;
+    uint specular;
+    uint emissive;
+    float4 diffuseFactor;
+    float4 specularFactor;
+    float3 emissiveFactor;
+};
+
 struct ShaderData {
     Globals *globals;
     Mesh *meshes;
     DrawCommand *drawCommands;
     uint *drawCommandCount;
     DrawData *drawData;
+    Material *materials;
 };
-
-float3 rotateQuat(float3 v, float4 q)
-{
-    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
-}

@@ -60,8 +60,6 @@ typedef struct {
     vec4_t diffuseFactor;
     vec4_t specularFactor;
     vec3_t emissiveFactor;
-
-    u32 padding;
 } material_t;
 
 typedef struct {
@@ -83,7 +81,8 @@ typedef struct {
 typedef struct {
     vec3_t p;
     vec3_t n;
-    vec2_t t;
+    vec3_t t;
+    vec2_t uv;
 } vertex_t;
 
 typedef struct {
@@ -104,6 +103,8 @@ typedef struct {
     vertex_t *vertices;
     u32 *indices;
     mesh_t *meshes;
+    draw_data_t *draws;
+    material_t *materials;
 }geometry_t;
 
 typedef struct {
@@ -114,6 +115,7 @@ typedef struct {
     vec4_t lightPos;
     u32 selected;
     u32 drawCount;
+    f32 lodTarget;
 } globals_t;
 
 typedef struct {
@@ -122,6 +124,7 @@ typedef struct {
     VkDeviceAddress drawCommandAddress;
     VkDeviceAddress drawCommandCountAddress;
     VkDeviceAddress drawDataAddress;
+    VkDeviceAddress materialAddress;
 } shader_data_t;
 
 typedef struct {
@@ -146,6 +149,7 @@ typedef struct {
     buffer_t shaderGlobalsBuffers[MAX_FRAMES_IN_FLIGHT];
     buffer_t drawBuffer;
     buffer_t meshBuffer;
+    buffer_t materialBuffer;
     buffer_t drawCommandBuffers[MAX_FRAMES_IN_FLIGHT];
     buffer_t drawCommandCountBuffer;
     buffer_t scratchBuffer;

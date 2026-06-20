@@ -37,7 +37,7 @@ foreach(SLANG_FILE ${SLANG_SOURCE_FILES})
 
     add_custom_command(
         OUTPUT ${SPIRV_FILE_ABS}
-        DEPENDS ${SLANG_FILE} "${ASSET_SOURCE_DIR}/shaders/mesh.h"
+        DEPENDS ${SLANG_FILE} "${ASSET_SOURCE_DIR}/shaders/mesh.glsl" "${ASSET_SOURCE_DIR}/shaders/math.glsl"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_DIR}"
         COMMAND ${SLANGC} ${SLANG_FILE} -target spirv -fvk-use-scalar-layout -o ${SPIRV_FILE_ABS}
         COMMENT "Compiling ${SLANG_FILE} to ${SPIRV_FILE_ABS}")

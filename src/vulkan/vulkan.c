@@ -153,7 +153,8 @@ void VulkanShutdown(void)
     DestroyBuffer(&gCtx->indexBuffer, gCtx->allocator);
     DestroyBuffer(&gCtx->drawBuffer, gCtx->allocator);
     DestroyBuffer(&gCtx->meshBuffer, gCtx->allocator);
-
+    DestroyBuffer(&gCtx->materialBuffer, gCtx->allocator);
+    
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroyFence(gCtx->device, gCtx->fences[i], NULL);
         vkDestroySemaphore(gCtx->device, gCtx->presentSemaphores[i], NULL);
@@ -239,43 +240,11 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
             ctx->allocator);
     }
 
-    ctx->drawCount = 25000;
-    f32 sceneRadius = 300.0f;
-
-    memory_arena_t *arena = PermanentArena(0);
-    draw_data_t *draws = NULL;
-
-    ArrayInitWithArena(draws, arena, ctx->drawCount);
-    ArrayResize(draws, ctx->drawCount);
-
-    for (u32 i = 0; i < ctx->drawCount; i++) {
-        draw_data_t *draw = &draws[i];
-        draw->position.X = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
-        draw->position.Y = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
-        draw->position.Z = (f32)(SDL_randf() * sceneRadius * 2 - sceneRadius);
-        draw->scale = (f32)(SDL_randf()) + 1;
-        draw->scale *= 2.0f;
-        draw->meshIndex = SDL_rand(ArrayCount(geometry.meshes));
-
-        f32 angle = SDL_randf() * SDL_PI_F / 2.0f;
-        vec3_t axis = (vec3_t){
-            (f32)(SDL_randf() * 2.0f - 1.0f),
-            (f32)(SDL_randf() * 2.0f - 1.0f),
-            (f32)(SDL_randf() * 2.0f - 1.0f)
-        };
-
-        axis = HMM_NormV3(axis);
-
-        quat_t orientation = HMM_QFromAxisAngle_LH(axis, angle);
-        draw->rx = orientation.X;
-        draw->ry = orientation.Y;
-        draw->rz = orientation.Z;
-        draw->rw = orientation.W;
-    }
+    gCtx->drawCount = ArrayCount(geometry.draws);
 
     CreateBuffer(&ctx->drawBuffer,
         ctx->device,
-        sizeof(draw_data_t) * ctx->drawCount,
+        sizeof(draw_data_t) * gCtx->drawCount,
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VMA_MEMORY_USAGE_AUTO,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
@@ -283,12 +252,12 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         VMA_ALLOCATION_CREATE_MAPPED_BIT,
         ctx->allocator);
 
-    UploadBuffer(&ctx->drawBuffer, draws, sizeof(draw_data_t) * ctx->drawCount, 0);
+    UploadBuffer(&ctx->drawBuffer, geometry.draws, sizeof(draw_data_t) * gCtx->drawCount, 0);
 
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         CreateBuffer(&ctx->drawCommandBuffers[i],
             ctx->device,
-            ctx->drawCount * sizeof(draw_command_t),
+            gCtx->drawCount * sizeof(draw_command_t),
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
             VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
             0,
@@ -306,12 +275,23 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         ctx->allocator
     );
 
+    CreateBuffer(&ctx->materialBuffer,
+        ctx->device,
+        sizeof(material_t) * ArrayCount(geometry.materials),
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
+        VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        ctx->allocator);
+
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         ctx->shaderData[i].globalsAddress = ctx->shaderGlobalsBuffers[i].deviceAddress;
         ctx->shaderData[i].drawDataAddress = ctx->drawBuffer.deviceAddress;
         ctx->shaderData[i].meshAddress = ctx->meshBuffer.deviceAddress;
         ctx->shaderData[i].drawCommandAddress = ctx->drawCommandBuffers[i].deviceAddress;
         ctx->shaderData[i].drawCommandCountAddress = ctx->drawCommandCountBuffer.deviceAddress;
+        ctx->shaderData[i].materialAddress = ctx->materialBuffer.deviceAddress;
     }
 
     const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena(0));
@@ -411,7 +391,8 @@ void VulkanRender(void)
     globals.frustum[2] = frustumY.Y;
     globals.frustum[3] = frustumY.Z;
     globals.drawCount = gCtx->drawCount;
-
+    globals.lodTarget = (2 / globals.P11) * (1.0f / (f32)gCtx->window.h);
+    
     UploadBuffer(&gCtx->shaderGlobalsBuffers[gCtx->frameIndex], &globals, sizeof(globals_t), 0);
 
     VkCommandBuffer cb = gCtx->commandBuffers[gCtx->frameIndex];
