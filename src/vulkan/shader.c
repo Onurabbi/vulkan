@@ -279,9 +279,11 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
     VK_CHECK(vkCreateShaderModule(device, &shaderModuleCI, NULL, &pipeline->shaderModule));
 
     //Pipeline
-    VkPushConstantRange pushConstantRange = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .size = pushConstantSize,
+    VkPushConstantRange pushConstantRanges[1] = {
+        {
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .size = pushConstantSize
+        },
     };
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI = {
@@ -289,7 +291,7 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
         .setLayoutCount = 1,
         .pSetLayouts = &setLayout,
         .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pushConstantRange
+        .pPushConstantRanges = pushConstantRanges
     };
 
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCI, NULL, &pipeline->pipelineLayout));
@@ -300,11 +302,10 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
     };
 
-    VkVertexInputAttributeDescription vertexAttributes[4] = {
+    VkVertexInputAttributeDescription vertexAttributes[3] = {
         {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,p)},
         {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,n)},
-        {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,t)},
-        {.location = 3, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(vertex_t,uv)}
+        {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(vertex_t,uv)}
     };
 
     VkPipelineVertexInputStateCreateInfo vertexInputState = {

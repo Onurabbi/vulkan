@@ -27,7 +27,6 @@ typedef struct {
     VmaAllocation allocation;
     VkImage image;
     VkImageView view;
-    VkSampler sampler;
     VkImageLayout layout;
     u32 textureIndex;
 } texture_resource_t;
@@ -74,7 +73,7 @@ void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
 void ResourceSystemShutdown(void);
 void ResourceSystemHotReload(resource_system_t *resourceSystem);
 
-const resource_t *ResourceSystemGetResource(const char *fileName);
+resource_t *ResourceSystemGetResource(const char *fileName);
 const resource_t **ResourceSystemGetTextures(memory_arena_t *arena);
 const geometry_t ResourceSystemGetGeometry(void);
 #endif

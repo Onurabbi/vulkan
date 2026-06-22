@@ -49,3 +49,4 @@ const char *StringUtilsGetExtensionFromPath(const char *path)
     while (*ptr && *ptr++ != '.') {} 
     return ptr;
 }
+

@@ -19,6 +19,8 @@
 
 #include <SDL3/SDL_filesystem.h>
 
+#define INVALID_TEXTURE ~(0U)
+
 static resource_system_t *gResourceSystem;
 
 typedef struct {
@@ -109,8 +111,7 @@ static void AppendMesh(vertex_t *vertices, u32 *indices, memory_arena_t *scratch
 
     mesh.center = center;
     mesh.radius = radius;
-    mesh.textureIndex = SDL_rand(3);
-
+    
     f32 lodScale = meshopt_simplifyScale(&positions[0].X, ArrayCount(vertices), sizeof(vec3_t));
 
     u32 *lodIndices = indices;
@@ -197,8 +198,6 @@ static void LoadMesh(resource_t *meshResource, memory_arena_t *scratchArena, mem
                 v->p.X = obj->positions[3 * gi.p + 0];
                 v->p.Y = obj->positions[3 * gi.p + 1];
                 v->p.Z = obj->positions[3 * gi.p + 2];
-                v->t.X = obj->texcoords[2 * gi.t + 0];
-                v->t.Y = 1.0f - obj->texcoords[2 * gi.t + 1];
                 v->n.X = obj->normals[3 * gi.n + 0];
                 v->n.Y = obj->normals[3 * gi.n + 1];
                 v->n.Z = obj->normals[3 * gi.n + 2];
@@ -303,15 +302,47 @@ static void decomposeTransform(f32 translation[3], f32 rotation[4], f32 scale[3]
 	rotation[qc ^ 3] = qs * (r12 + qs3 * r21);
 }
 
-static u32 GetTextureIndexFromTextureView(const cgltf_texture_view *view)
+//TODO: Is this the right place to do this?
+static const char *ReplaceURIWithDDS(const char *uri, memory_arena_t *scratchArena)
 {
+    if (!uri) {
+        return NULL;
+    }
+    u32 uriLength = (u32)strlen(uri);
+    char *dst = PushArray(scratchArena, uriLength + 1, char);
+    const char *result = dst;
+    const char *src = uri;
+    while (*src && *src != '.') {
+        *dst++ = *src++;
+    }
+    *dst++ = '.';
+    *dst++ = 'd';
+    *dst++ = 'd';
+    *dst++ = 's';
+    return result;
+}
+
+static u32 GetTextureIndexFromTextureView(cgltf_texture_view *view)
+{
+    const char *uri = NULL;
+    //check what the extension is
+    const char *extension = StringUtilsGetExtensionFromPath(view->texture->image->uri);
+    //check if it's png
+    if (strncmp(extension, "dds", 3) == 0) {
+        uri = view->texture->image->uri;
+    } else {
+        if (strncmp(extension, "png", 3) == 0 ||
+            strncmp(extension, "jpg", 3) == 0) {
+            uri = ReplaceURIWithDDS(view->texture->image->uri, ScratchArena(0));
+        } else {
+            LV_ASSERT(false && "Unknown texture extension");
+        }
+    }
+
     u32 result = -1;
-    const char *uri = view->texture->image->uri;
-    u64 data;
-    if (HashMapLookup(&gResourceSystem->map, uri, (u32)strlen(uri), &data)) {
-        resource_t *resource = (resource_t *)data;
-        LV_ASSERT(resource->type == RESOURCE_TYPE_TEXTURE);
-        result = resource->texture.textureIndex;
+    resource_t *res = ResourceSystemGetResource(uri);
+    if (res) {
+        result = res->texture.textureIndex;
     }
     return result;
 }
@@ -423,7 +454,7 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
                     LOGE("No material associated with this mesh");
                 }
                 draw.materialIndex = material ? materialOffset +  (i32)(cgltf_material_index(data, material)) : 0;
-
+                LV_ASSERT(draw.materialIndex >= 0 && draw.materialIndex < data->materials_count);
                 if (material && material->alpha_mode != cgltf_alpha_mode_opaque) {
                     draw.postPass = 1;
                 }
@@ -442,30 +473,50 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
         cgltf_material *material = &data->materials[i];
 
         material_t mat = {0};
-        mat.diffuseFactor = (vec4_t){1,1,1,1};
+        mat.diffuseFactor[0] = 1;
+        mat.diffuseFactor[1] = 1;
+        mat.diffuseFactor[2] = 1;
+        mat.diffuseFactor[3] = 1;
+        mat.specularFactor[0] = 1;
+        mat.specularFactor[1] = 1;
+        mat.specularFactor[2] = 1;
+        mat.specularFactor[3] = 1;
+        mat.emissiveFactor[0] = 1;
+        mat.emissiveFactor[1] = 1;
+        mat.emissiveFactor[2] = 1;
+        mat.albedo   = 0;
+        mat.emissive = 0;
+        mat.normal   = 0;
 
         if (material->has_pbr_specular_glossiness) {
             if  (material->pbr_specular_glossiness.diffuse_texture.texture) {
                 mat.albedo = GetTextureIndexFromTextureView(&material->pbr_specular_glossiness.diffuse_texture);
             }
+            LV_ASSERT(mat.albedo < gResourceSystem->textureCount);
             float *diffuseFactor = material->pbr_specular_glossiness.diffuse_factor;
-            mat.diffuseFactor = HMM_V4(diffuseFactor[0], diffuseFactor[1], diffuseFactor[2], diffuseFactor[3]);
+            memcpy(mat.diffuseFactor, diffuseFactor, sizeof(mat.diffuseFactor));
 
             if (material->pbr_specular_glossiness.specular_glossiness_texture.texture) {
                 mat.specular = GetTextureIndexFromTextureView(&material->pbr_specular_glossiness.specular_glossiness_texture);
             }
-            mat.specularFactor = HMM_V4(material->pbr_specular_glossiness.specular_factor[0], material->pbr_specular_glossiness.specular_factor[1], material->pbr_specular_glossiness.specular_factor[2], material->pbr_specular_glossiness.glossiness_factor);
+            float *specularFactor = material->pbr_specular_glossiness.specular_factor;
+            memcpy(mat.specularFactor, specularFactor, sizeof(mat.specularFactor));
         } else if (material->has_pbr_metallic_roughness) {
             if (material->pbr_metallic_roughness.base_color_texture.texture) {
                 mat.albedo = GetTextureIndexFromTextureView(&material->pbr_metallic_roughness.base_color_texture);
             }
+            LV_ASSERT(mat.albedo < gResourceSystem->textureCount);
             float *baseColorFactor = material->pbr_metallic_roughness.base_color_factor;
-            mat.diffuseFactor = HMM_V4(baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]);
+            memcpy(mat.diffuseFactor, baseColorFactor, sizeof(mat.diffuseFactor)); 
 
             if (material->pbr_metallic_roughness.metallic_roughness_texture.texture) {
                 mat.specular = GetTextureIndexFromTextureView(&material->pbr_metallic_roughness.metallic_roughness_texture);
             }
-            mat.specularFactor = (vec4_t){ 1 , 1, 1, 1 - material->pbr_metallic_roughness.roughness_factor };
+
+            mat.specularFactor[0] = 1;
+            mat.specularFactor[1] = 1;
+            mat.specularFactor[2] = 1;
+            mat.specularFactor[3] = 1 - material->pbr_metallic_roughness.roughness_factor;
         }
 
         if (material->normal_texture.texture) {
@@ -475,7 +526,10 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
         if (material->emissive_texture.texture) {
             mat.emissive = GetTextureIndexFromTextureView(&material->emissive_texture);
         }
-        mat.emissiveFactor = (vec3_t){ material->emissive_factor[0], material->emissive_factor[1], material->emissive_factor[2] };
+        mat.emissiveFactor[0] = material->emissive_factor[0];
+        mat.emissiveFactor[1] = material->emissive_factor[1];
+        mat.emissiveFactor[2] = material->emissive_factor[2];
+
         ArrayPush(gResourceSystem->materials, mat);
     }
 
@@ -758,14 +812,14 @@ void ResourceSystemHotReload(resource_system_t *resourceSystem)
     gResourceSystem = resourceSystem;
 }
 
-const resource_t *ResourceSystemGetResource(const char *uri)
+resource_t *ResourceSystemGetResource(const char *uri)
 {
     const char *fullPath = GetFullPathFromUri(uri, GetResourceType(uri), ScratchArena(0));
     u64 data = 0;
     if (!HashMapLookup(&gResourceSystem->map, fullPath, strlen(fullPath), &data)) {
         LOGE("Unable to find resource %s", fullPath);
     }
-    return (const resource_t *)data;
+    return (resource_t*)data;
 }
 
 const resource_t **ResourceSystemGetTextures(memory_arena_t *arena)

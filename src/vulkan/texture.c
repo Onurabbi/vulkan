@@ -93,15 +93,18 @@ static VkFormat getFormat(const DDS_HEADER *header, const DDS_HEADER_DXT10 *head
 	{
 		switch (header10->dxgiFormat)
 		{
-		case DXGI_FORMAT_BC1_UNORM:
-		case DXGI_FORMAT_BC1_UNORM_SRGB:
-			return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
-		case DXGI_FORMAT_BC2_UNORM:
-		case DXGI_FORMAT_BC2_UNORM_SRGB:
-			return VK_FORMAT_BC2_UNORM_BLOCK;
-		case DXGI_FORMAT_BC3_UNORM:
-		case DXGI_FORMAT_BC3_UNORM_SRGB:
-			return VK_FORMAT_BC3_UNORM_BLOCK;
+        case DXGI_FORMAT_BC1_UNORM:
+            return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+            return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+        case DXGI_FORMAT_BC2_UNORM:
+            return VK_FORMAT_BC2_UNORM_BLOCK;
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+            return VK_FORMAT_BC2_SRGB_BLOCK;
+        case DXGI_FORMAT_BC3_UNORM:
+            return VK_FORMAT_BC3_UNORM_BLOCK;
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+            return VK_FORMAT_BC3_SRGB_BLOCK;
 		case DXGI_FORMAT_BC4_UNORM:
 			return VK_FORMAT_BC4_UNORM_BLOCK;
 		case DXGI_FORMAT_BC4_SNORM:
@@ -110,13 +113,14 @@ static VkFormat getFormat(const DDS_HEADER *header, const DDS_HEADER_DXT10 *head
 			return VK_FORMAT_BC5_UNORM_BLOCK;
 		case DXGI_FORMAT_BC5_SNORM:
 			return VK_FORMAT_BC5_SNORM_BLOCK;
-		case DXGI_FORMAT_BC6H_UF16:
-			return VK_FORMAT_BC6H_UFLOAT_BLOCK;
-		case DXGI_FORMAT_BC6H_SF16:
-			return VK_FORMAT_BC6H_SFLOAT_BLOCK;
-		case DXGI_FORMAT_BC7_UNORM:
-		case DXGI_FORMAT_BC7_UNORM_SRGB:
-			return VK_FORMAT_BC7_UNORM_BLOCK;
+        case DXGI_FORMAT_BC6H_UF16:
+            return VK_FORMAT_BC6H_UFLOAT_BLOCK;
+        case DXGI_FORMAT_BC6H_SF16:
+            return VK_FORMAT_BC6H_SFLOAT_BLOCK;
+        case DXGI_FORMAT_BC7_UNORM:
+            return VK_FORMAT_BC7_UNORM_BLOCK;
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return VK_FORMAT_BC7_SRGB_BLOCK;
 		}
 	}
 
@@ -153,7 +157,7 @@ static size_t getImageSizeRGBA(u32 width, u32 height, u32 levels)
 	return result;
 }
 
-b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, const char *path)
+b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, VkSampler sampler, const char *path)
 {
     b8 success = false;
 
@@ -332,20 +336,8 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
     vkFreeCommandBuffers(device, pool, 1, &cbOneTime);
     vkDestroyFence(device, fenceOneTime, NULL);
 
-    VkSamplerCreateInfo samplerCI = {
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = VK_FILTER_LINEAR,
-        .minFilter = VK_FILTER_LINEAR,
-        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .anisotropyEnable = VK_TRUE,
-        .maxAnisotropy = 8.0f,
-        .maxLod = (float)header.dwMipMapCount,
-    };
-
-    VK_CHECK(vkCreateSampler(device, &samplerCI, NULL, &texture->sampler));
     success = true;
-    texture->layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
-
+    texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 exit:
     if (file) {
         fclose(file);
@@ -356,9 +348,25 @@ exit:
 
 void DestroyTexture(texture_resource_t *texture, VmaAllocator allocator, VkDevice device)
 {
-    vkDestroySampler(device, texture->sampler, NULL);
     vkDestroyImageView(device, texture->view, NULL);
     vmaDestroyImage(allocator, texture->image, texture->allocation);
+}
+
+VkSampler CreateTextureSampler(VkDevice device)
+{
+    VkSampler result = VK_NULL_HANDLE;
+    VkSamplerCreateInfo samplerCI = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = 8.0f,
+        .maxLod = 16.0f,
+    };
+
+    VK_CHECK(vkCreateSampler(device, &samplerCI, NULL, &result));
+    return result;
 }
 
 VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, u32 mipLevels)

@@ -13,4 +13,5 @@ void StringUtilsInit(string_interning_system_t *system);
 void StringUtilsHotReload(string_interning_system_t *system);
 void StringUtilsShutdown(void);
 const char *StringUtilsGetExtensionFromPath(const char *path);
+
 #endif

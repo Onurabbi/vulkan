@@ -1,4 +1,5 @@
 #include "mesh.glsl"
+#include "math.glsl"
 
 [[vk::push_constant]] ShaderData shaderData;
 

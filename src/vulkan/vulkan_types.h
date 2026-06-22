@@ -57,9 +57,9 @@ typedef struct {
     u32 normal;
     u32 specular;
     u32 emissive;
-    vec4_t diffuseFactor;
-    vec4_t specularFactor;
-    vec3_t emissiveFactor;
+    f32 diffuseFactor[4];
+    f32 specularFactor[4];
+    f32 emissiveFactor[3];
 } material_t;
 
 typedef struct {
@@ -73,7 +73,6 @@ typedef struct {
     f32 radius;
     u32 vertexOffset;
     u32 vertexCount;
-    u32 textureIndex;
     u32 lodCount;
     mesh_lod_t meshLods[8];
 } mesh_t;
@@ -81,7 +80,6 @@ typedef struct {
 typedef struct {
     vec3_t p;
     vec3_t n;
-    vec3_t t;
     vec2_t uv;
 } vertex_t;
 
@@ -155,6 +153,7 @@ typedef struct {
     buffer_t scratchBuffer;
     VmaAllocator allocator;
     VkDescriptorSetLayout texLayout;
+    VkSampler texSampler;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
     VkFence fences[MAX_FRAMES_IN_FLIGHT];

@@ -118,7 +118,7 @@ void VulkanUnloadShader(resource_t *shaderResource)
 
 void VulkanLoadTexture(resource_t *textureResource, const char *path)
 {
-    if (!CreateTexture(&textureResource->texture, &gCtx->scratchBuffer, gCtx->device, gCtx->allocator, gCtx->commandPool, gCtx->queue, path)) {
+    if (!CreateTexture(&textureResource->texture, &gCtx->scratchBuffer, gCtx->device, gCtx->allocator, gCtx->commandPool, gCtx->queue, gCtx->texSampler, path)) {
         LOGE("Unable to load texture %s", path);
     }
 }
@@ -172,6 +172,7 @@ void VulkanShutdown(void)
     SDL_Vulkan_DestroySurface(gCtx->instance, gCtx->window.surface, NULL);
     SDL_DestroyWindow(gCtx->window.window);
 
+    vkDestroySampler(gCtx->device, gCtx->texSampler, NULL);
     vmaDestroyAllocator(gCtx->allocator);
 
     vkDestroyDevice(gCtx->device, NULL);
@@ -183,8 +184,6 @@ void VulkanShutdown(void)
 static void VulkanLoadResources(vulkan_context_t *ctx)
 {
     ctx->resourcesLoaded = true;
-
-
     //draws
     SDL_srand(188);
 
@@ -275,6 +274,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         ctx->allocator
     );
 
+    u32 materialCount = ArrayCount(geometry.materials);
     CreateBuffer(&ctx->materialBuffer,
         ctx->device,
         sizeof(material_t) * ArrayCount(geometry.materials),
@@ -284,6 +284,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
         VMA_ALLOCATION_CREATE_MAPPED_BIT,
         ctx->allocator);
+    UploadBuffer(&ctx->materialBuffer, geometry.materials, sizeof(material_t) * materialCount, 0);
 
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         ctx->shaderData[i].globalsAddress = ctx->shaderGlobalsBuffers[i].deviceAddress;
@@ -312,6 +313,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     VK_CHECK(vkCreateDescriptorPool(ctx->device, &descPoolCI, NULL, &ctx->descriptorPool));
 
     ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount);
+    ctx->texSampler = CreateTextureSampler(ctx->device);
 
     VkFormat imageFormat = ctx->swapchainImages[0].format;
     VkFormat depthFormat = ctx->depthImage.format;
@@ -341,7 +343,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         VkDescriptorImageInfo info = {0};
         info.imageLayout = textureResources[i]->texture.layout;
         info.imageView   = textureResources[i]->texture.view;
-        info.sampler     = textureResources[i]->texture.sampler;
+        info.sampler     = ctx->texSampler;
         ArrayPush(textureDescriptors, info);
     }
 
@@ -349,6 +351,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = ctx->descriptorSetTex,
         .dstBinding = 0,
+        .dstArrayElement = 0,
         .descriptorCount = texCount,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .pImageInfo = textureDescriptors,
@@ -363,7 +366,7 @@ void VulkanRender(void)
         VulkanLoadResources(gCtx);
     }
 
-    float cameraZ = 6.0f;
+    float cameraZ = 100.0f;
 
     VK_CHECK(vkWaitForFences(gCtx->device, 1, &gCtx->fences[gCtx->frameIndex], true, UINT64_MAX));
     VK_CHECK(vkResetFences(gCtx->device, 1, &gCtx->fences[gCtx->frameIndex]));
@@ -515,7 +518,7 @@ void VulkanRender(void)
     VkDeviceSize vOffset = 0;
     vkCmdBindVertexBuffers(cb, 0, 1, &gCtx->vertexBuffer.buffer, &vOffset);
     vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
+    vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
 
     vkCmdDrawIndexedIndirectCount(cb, gCtx->drawCommandBuffers[gCtx->frameIndex].buffer, offsetof(draw_command_t, command), gCtx->drawCommandCountBuffer.buffer, 0, gCtx->drawCount, sizeof(draw_command_t));
     vkCmdEndRendering(cb);
