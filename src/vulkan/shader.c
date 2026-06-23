@@ -296,24 +296,8 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
 
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCI, NULL, &pipeline->pipelineLayout));
 
-    VkVertexInputBindingDescription vertexBinding = {
-        .binding = 0,
-        .stride = sizeof(vertex_t),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
-    };
-
-    VkVertexInputAttributeDescription vertexAttributes[3] = {
-        {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,p)},
-        {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex_t,n)},
-        {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(vertex_t,uv)}
-    };
-
     VkPipelineVertexInputStateCreateInfo vertexInputState = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &vertexBinding,
-        .vertexAttributeDescriptionCount = ARRAY_SIZE(vertexAttributes),
-        .pVertexAttributeDescriptions = vertexAttributes,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
     };
 
     VkPipelineInputAssemblyStateCreateInfo vertexInputAssembly = {

@@ -89,13 +89,15 @@ static void AppendMesh(vertex_t *vertices, u32 *indices, memory_arena_t *scratch
     vec3_t *positions = NULL;
     ArrayInitWithArena(positions, scratchArena, ArrayCount(vertices));
     for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        ArrayPush(positions, vertices[i].p);
+        vec3_t pos = (vec3_t){ meshopt_dequantizeHalf(vertices[i].vx), meshopt_dequantizeHalf(vertices[i].vy), meshopt_dequantizeHalf(vertices[i].vz) };  
+        ArrayPush(positions, pos);
     }
 
     vec3_t *normals = NULL;
     ArrayInitWithArena(normals, scratchArena, ArrayCount(vertices));
     for (u32 i = 0; i < ArrayCount(vertices); i++) {
-        ArrayPush(normals, vertices[i].n);
+        vec3_t normal = (vec3_t){ vertices[i].nx / 127.0f - 1.0f, vertices[i].ny / 127.0f - 1.0f, vertices[i].nz / 127.0f - 1.0f };
+        ArrayPush(normals, normal);
     }
 
     vec3_t center =  {0};
@@ -195,12 +197,6 @@ static void LoadMesh(resource_t *meshResource, memory_arena_t *scratchArena, mem
                 }
 
                 vertex_t *v = &vertices[vertex_offset++];
-                v->p.X = obj->positions[3 * gi.p + 0];
-                v->p.Y = obj->positions[3 * gi.p + 1];
-                v->p.Z = obj->positions[3 * gi.p + 2];
-                v->n.X = obj->normals[3 * gi.n + 0];
-                v->n.Y = obj->normals[3 * gi.n + 1];
-                v->n.Z = obj->normals[3 * gi.n + 2];
             }
             index_offset += obj->face_vertices[i];
         }
@@ -222,35 +218,50 @@ static void LoadVertices(vertex_t *vertices, const cgltf_primitive *prim, memory
     ArrayInitWithArena(scratch, arena, vertexCount * 4);
     ArrayResize(scratch, vertexCount * 4);
 
-    if (const cgltf_accessor *pos = cgltf_find_accessor(prim, cgltf_attribute_type_position, 0)) {
+    const cgltf_accessor *pos = cgltf_find_accessor(prim, cgltf_attribute_type_position, 0);
+    if (pos) {
         LV_ASSERT(cgltf_num_components(pos->type) == 3);
         cgltf_accessor_unpack_floats(pos, scratch, vertexCount * 3);
 
         for (u32 j = 0; j < vertexCount; j++) {
-            vertices[j].p.X = scratch[j * 3 + 0];
-            vertices[j].p.Y = scratch[j * 3 + 1];
-            vertices[j].p.Z = scratch[j * 3 + 2];
+            vertices[j].vx = meshopt_quantizeHalf(scratch[j * 3 + 0]);
+            vertices[j].vy = meshopt_quantizeHalf(scratch[j * 3 + 1]);
+            vertices[j].vz = meshopt_quantizeHalf(scratch[j * 3 + 2]);
         }
     }
 
-    if (const cgltf_accessor *nrm = cgltf_find_accessor(prim, cgltf_attribute_type_normal, 0)) {
+    const cgltf_accessor *nrm = cgltf_find_accessor(prim, cgltf_attribute_type_normal, 0);
+    if (nrm) {
         LV_ASSERT(cgltf_num_components(nrm->type) == 3);
         cgltf_accessor_unpack_floats(nrm, scratch, vertexCount * 3);
 
         for (u32 j = 0; j < vertexCount; j++) {
-            vertices[j].n.X = scratch[j * 3 + 0];
-            vertices[j].n.Y = scratch[j * 3 + 1];
-            vertices[j].n.Z = scratch[j * 3 + 2];
+            vertices[j].nx = (u8)(scratch[j * 3 + 0] * 127.0f + 127.5f);
+            vertices[j].ny = (u8)(scratch[j * 3 + 1] * 127.0f + 127.5f);
+            vertices[j].nz = (u8)(scratch[j * 3 + 2] * 127.0f + 127.5f);
         }
     }
 
-    if (const cgltf_accessor *tex = cgltf_find_accessor(prim, cgltf_attribute_type_texcoord, 0)) {
+    const cgltf_accessor *tan = cgltf_find_accessor(prim, cgltf_attribute_type_tangent, 0);
+    if (tan) {
+        LV_ASSERT(cgltf_num_components(tan->type) == 4);
+        cgltf_accessor_unpack_floats(tan, scratch, vertexCount * 4);
+        for (u32 j = 0; j < vertexCount; j++) {
+            vertices[j].tx = (u8)(scratch[j * 4 + 0] * 127.0f + 127.5f);
+            vertices[j].ty = (u8)(scratch[j * 4 + 1] * 127.0f + 127.5f);
+            vertices[j].tz = (u8)(scratch[j * 4 + 2] * 127.0f + 127.5f);
+            vertices[j].tw = (u8)(scratch[j * 4 + 3] * 127.0f + 127.5f);
+        }
+    }
+
+    const cgltf_accessor *tex = cgltf_find_accessor(prim, cgltf_attribute_type_texcoord, 0);
+    if (tex) {
         LV_ASSERT(cgltf_num_components(tex->type) == 2);
         cgltf_accessor_unpack_floats(tex, scratch, vertexCount * 2);
 
         for (u32 j = 0; j < vertexCount; j++) {
-            vertices[j].uv.X = scratch[j * 2 + 0];
-            vertices[j].uv.Y = scratch[j * 2 + 1];
+            vertices[j].u = meshopt_quantizeHalf(scratch[j * 2 + 0]);
+            vertices[j].v = meshopt_quantizeHalf(scratch[j * 2 + 1]);
         }
     }
 }

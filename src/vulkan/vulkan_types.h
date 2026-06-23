@@ -78,9 +78,10 @@ typedef struct {
 } mesh_t;
 
 typedef struct {
-    vec3_t p;
-    vec3_t n;
-    vec2_t uv;
+    u16 vx, vy, vz, vw;
+    u8 nx, ny, nz, nw;
+    u8 tx, ty, tz, tw;
+    u16 u,v;
 } vertex_t;
 
 typedef struct {
@@ -123,6 +124,7 @@ typedef struct {
     VkDeviceAddress drawCommandCountAddress;
     VkDeviceAddress drawDataAddress;
     VkDeviceAddress materialAddress;
+    VkDeviceAddress vertexAddress;
 } shader_data_t;
 
 typedef struct {

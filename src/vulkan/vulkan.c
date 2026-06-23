@@ -193,7 +193,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     CreateBuffer(&ctx->vertexBuffer,
         ctx->device,
         vBufSize,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VMA_MEMORY_USAGE_AUTO,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
         VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
@@ -293,6 +293,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         ctx->shaderData[i].drawCommandAddress = ctx->drawCommandBuffers[i].deviceAddress;
         ctx->shaderData[i].drawCommandCountAddress = ctx->drawCommandCountBuffer.deviceAddress;
         ctx->shaderData[i].materialAddress = ctx->materialBuffer.deviceAddress;
+        ctx->shaderData[i].vertexAddress   = ctx->vertexBuffer.deviceAddress;
     }
 
     const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena(0));
@@ -515,8 +516,10 @@ void VulkanRender(void)
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetTex, 0, NULL);
 
+#if 0
     VkDeviceSize vOffset = 0;
     vkCmdBindVertexBuffers(cb, 0, 1, &gCtx->vertexBuffer.buffer, &vOffset);
+#endif
     vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
 
