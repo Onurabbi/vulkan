@@ -36,7 +36,7 @@ VSOutput main(VSInput input, uint instanceIndex : SV_VulkanInstanceID, uint draw
     output.Normal  = input.Normal;
     output.UV      = input.UV;
     output.wPos    = wpos;
-    output.drawID  = drawID;
+    output.drawID  = cmd.drawId;
     return output;
 }
 
@@ -47,13 +47,6 @@ float4 main(VSOutput input, float4 fragCoord: SV_Position) {
 
     float deband = gradientNoise(fragCoord.xy) * 2 - 1;
     float4 albedo = material.diffuseFactor;
-#if 1
-    if (material.albedo >= 0 || material.albedo < 389) {
-        albedo *= textures[NonUniformResourceIndex(material.albedo)].Sample(input.UV);
-    }
-#else
     albedo *= textures[NonUniformResourceIndex(material.albedo)].Sample(input.UV);
-
-#endif
     return float4(albedo.rgb, 1.0);
 }

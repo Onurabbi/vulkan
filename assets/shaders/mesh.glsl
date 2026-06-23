@@ -10,7 +10,6 @@ struct Mesh {
     float radius;
     uint vertexOffset;
     uint vertexCount;
-    uint textureIndex;
     uint lodCount;
     MeshLod meshLods[8];
 };
