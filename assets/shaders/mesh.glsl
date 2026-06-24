@@ -1,8 +1,8 @@
 struct Vertex {
-    uint16_t vx, vy, vz, vw;
+    half vx, vy, vz, vw;
     uint8_t nx, ny, nz, nw;
     uint8_t tx, ty, tz, tw;
-    uint16_t u, v;
+    half u, v;
 };
 
 struct MeshLod {

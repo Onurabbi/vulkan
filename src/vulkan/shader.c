@@ -145,7 +145,6 @@ void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *ar
         insn += wordCount;
     }
 
-
     for (u32 i = 0; i < idBound; i++) {
         Id id = ids[i];
 

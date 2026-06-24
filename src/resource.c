@@ -227,6 +227,7 @@ static void LoadVertices(vertex_t *vertices, const cgltf_primitive *prim, memory
             vertices[j].vx = meshopt_quantizeHalf(scratch[j * 3 + 0]);
             vertices[j].vy = meshopt_quantizeHalf(scratch[j * 3 + 1]);
             vertices[j].vz = meshopt_quantizeHalf(scratch[j * 3 + 2]);
+            vertices[j].vw = 0;
         }
     }
 
@@ -239,6 +240,7 @@ static void LoadVertices(vertex_t *vertices, const cgltf_primitive *prim, memory
             vertices[j].nx = (u8)(scratch[j * 3 + 0] * 127.0f + 127.5f);
             vertices[j].ny = (u8)(scratch[j * 3 + 1] * 127.0f + 127.5f);
             vertices[j].nz = (u8)(scratch[j * 3 + 2] * 127.0f + 127.5f);
+            vertices[j].nw = 0;
         }
     }
 

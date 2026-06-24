@@ -11,6 +11,7 @@ void UploadBuffer(buffer_t *buffer, const void *data, VkDeviceSize size, VkDevic
 
 void CreateBuffer(buffer_t *buffer, VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VmaAllocator allocator)
 {
+    buffer->deviceAddress = 0;
     buffer->size = size;
 
     VkBufferCreateInfo bufferCI = {
@@ -32,6 +33,7 @@ void CreateBuffer(buffer_t *buffer, VkDevice device, VkDeviceSize size, VkBuffer
             .buffer = buffer->buffer
         };
         buffer->deviceAddress = vkGetBufferDeviceAddress(device, &bufferAddressInfo);
+        LV_ASSERT(buffer->deviceAddress && "Expected a valid shader device address");
     }
 }
 

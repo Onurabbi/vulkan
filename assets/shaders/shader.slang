@@ -15,7 +15,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
-VSOutput main(uint instanceIndex : SV_VulkanInstanceID, uint drawID : SV_DrawIndex, uint vertexIndex : SV_VertexID)
+VSOutput main(uint instanceIndex : SV_VulkanInstanceID, uint drawID : SV_DrawIndex, uint vi : SV_VertexID)
 {
     VSOutput output;
 
@@ -25,11 +25,11 @@ VSOutput main(uint instanceIndex : SV_VulkanInstanceID, uint drawID : SV_DrawInd
     DrawCommand cmd = drawCommands[drawID];
     DrawData meshDraw = drawData[cmd.drawId];
     Mesh mesh = shaderData.meshes[meshDraw.meshIndex];
-    Vertex vertex = shaderData.vertices[vertexIndex];
-    float3 pos      = float3(vertex.vx, vertex.vy, vertex.vz);
-    float3 normal   = float3(int(vertex.nx), int(vertex.ny), int(vertex.nz)) / 127.0 - 1.0;
-    float2 uv       = float2(vertex.u, vertex.v);
-    float4 tangent  = float4(int(vertex.tx), int(vertex.ty), int(vertex.tz), int(vertex.tw)); 
+    Vertex *vertices = shaderData.vertices;
+    float3 pos      = float3(vertices[vi].vx, vertices[vi].vy, vertices[vi].vz);
+    float3 normal   = float3(int(vertices[vi].nx), int(vertices[vi].ny), int(vertices[vi].nz)) / 127.0 - 1.0;
+    float2 uv       = float2(vertices[vi].u, vertices[vi].v);
+    float4 tangent  = float4(int(vertices[vi].tx), int(vertices[vi].ty), int(vertices[vi].tz), int(vertices[vi].tw)) / 127.0 - 1.0; 
     float3 wpos     = rotateQuat(pos, meshDraw.orientation) * meshDraw.scale + meshDraw.position;
     output.position = mul(globals.projection, mul(globals.view, float4(wpos, 1.0f)));
     output.normal   = normal;
@@ -40,11 +40,11 @@ VSOutput main(uint instanceIndex : SV_VulkanInstanceID, uint drawID : SV_DrawInd
 }
 
 [shader("fragment")]
-float4 main(VSOutput input, float4 fragCoord: SV_Position) {
-    DrawData drawData = shaderData.drawData[NonUniformResourceIndex(input.drawID)];
-    Material material = shaderData.materials[NonUniformResourceIndex(drawData.materialIndex)];
+float4 main(VSOutput input) {
+    DrawData drawData = shaderData.drawData[input.drawID];
+    Material material = shaderData.materials[drawData.materialIndex];
 
-    float deband = gradientNoise(fragCoord.xy) * 2 - 1;
+    float deband = gradientNoise(input.position.xy) * 2 - 1;
     float4 albedo = material.diffuseFactor;
     albedo *= textures[NonUniformResourceIndex(material.albedo)].Sample(input.uv);
     return float4(albedo.rgb, 1.0);

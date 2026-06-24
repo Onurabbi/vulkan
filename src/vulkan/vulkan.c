@@ -193,7 +193,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     CreateBuffer(&ctx->vertexBuffer,
         ctx->device,
         vBufSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         VMA_MEMORY_USAGE_AUTO,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
         VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
@@ -491,10 +491,11 @@ void VulkanRender(void)
     vkCmdDispatch(cb, numWorkgroups, 1, 1);
 
     // Synchronize compute shader write with draw indirect read
-    StageBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+    StageBarrier(cb, 
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        VK_ACCESS_2_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
 
     vkCmdBeginRendering(cb, &renderingInfo);
 
@@ -515,11 +516,6 @@ void VulkanRender(void)
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetTex, 0, NULL);
-
-#if 0
-    VkDeviceSize vOffset = 0;
-    vkCmdBindVertexBuffers(cb, 0, 1, &gCtx->vertexBuffer.buffer, &vOffset);
-#endif
     vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
 
@@ -722,12 +718,15 @@ void VulkanInit(vulkan_context_t *ctx)
     VkPhysicalDeviceVulkan11Features features11 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
         .storageBuffer16BitAccess = true,
+        .storagePushConstant16 = true,
         .shaderDrawParameters = true,
     };
 
     VkPhysicalDeviceVulkan12Features features12 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &features11,
+        .shaderFloat16 = true,
+        .shaderInt8 = true,
         .descriptorIndexing = true,
         .shaderSampledImageArrayNonUniformIndexing = true,
         .descriptorBindingVariableDescriptorCount = true,
@@ -737,6 +736,11 @@ void VulkanInit(vulkan_context_t *ctx)
         .scalarBlockLayout = true,
         .storageBuffer8BitAccess = true,
         .uniformAndStorageBuffer8BitAccess = true,
+        .storagePushConstant8 = true,
+        .samplerFilterMinmax = true,
+        .descriptorBindingSampledImageUpdateAfterBind = true,
+        .descriptorBindingPartiallyBound = true,
+        .runtimeDescriptorArray = true,
     };
 
     VkPhysicalDeviceVulkan13Features features13 = {
@@ -744,20 +748,28 @@ void VulkanInit(vulkan_context_t *ctx)
         .pNext = &features12,
         .synchronization2 = true,
         .dynamicRendering = true,
+        .maintenance4 = true,
     };
 
-    VkPhysicalDeviceFeatures features = {
-        .samplerAnisotropy = true,
+    VkPhysicalDeviceFeatures2 features2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .features.samplerAnisotropy = true,
+        .features.multiDrawIndirect = true,
+        .features.pipelineStatisticsQuery = true,
+        .features.shaderInt16 = true,
+        .features.shaderInt64 = true,
+        .features.samplerAnisotropy = true,
+        .pNext = &features13,
     };
 
     VkDeviceCreateInfo deviceCI = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &features13,
+        .pNext = &features2,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queueCI,
         .enabledExtensionCount = 1,
         .ppEnabledExtensionNames = deviceExtensions,
-        .pEnabledFeatures = &features,
+
     };
 
     VkDevice device;
