@@ -1,3 +1,5 @@
+#define INVALID_TEXTURE 0xFFFFFFFF
+
 struct Vertex {
     half vx, vy, vz, vw;
     uint8_t nx, ny, nz, nw;
@@ -20,8 +22,7 @@ struct Mesh {
     MeshLod meshLods[8];
 };
 
-struct DrawData 
-{
+struct DrawData {
     float4 orientation;
     float3 position;
     float scale;
@@ -35,7 +36,8 @@ struct Globals {
     float4 frustum;
     float4x4 projection;
     float4x4 view;
-    float4 lightPos;
+    float3 lightDir;
+    float3 camPos;
     uint selected;
     uint drawCount;
     float lodTarget;
@@ -52,20 +54,24 @@ struct DrawCommand {
 
 struct Material {
     uint albedo;
+    uint metalRoughness;
     uint normal;
-    uint specular;
     uint emissive;
+    uint ao;
     float4 diffuseFactor;
-    float4 specularFactor;
     float3 emissiveFactor;
+    float metallicFactor;
+    float roughnessFactor;
+    float aoStrength;
+    float normalScale;
 };
 
 struct ShaderData {
-    Globals *globals;
-    Mesh *meshes;
+    Globals     *globals;
+    Mesh        *meshes;
     DrawCommand *drawCommands;
-    uint *drawCommandCount;
-    DrawData *drawData;
-    Material *materials;
-    Vertex *vertices;
+    uint        *drawCommandCount;
+    DrawData    *drawData;
+    Material    *materials;
+    Vertex      *vertices;
 };

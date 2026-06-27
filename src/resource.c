@@ -486,34 +486,9 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
         cgltf_material *material = &data->materials[i];
 
         material_t mat = {0};
-        mat.diffuseFactor[0] = 1;
-        mat.diffuseFactor[1] = 1;
-        mat.diffuseFactor[2] = 1;
-        mat.diffuseFactor[3] = 1;
-        mat.specularFactor[0] = 1;
-        mat.specularFactor[1] = 1;
-        mat.specularFactor[2] = 1;
-        mat.specularFactor[3] = 1;
-        mat.emissiveFactor[0] = 1;
-        mat.emissiveFactor[1] = 1;
-        mat.emissiveFactor[2] = 1;
-        mat.albedo   = 0;
-        mat.emissive = 0;
-        mat.normal   = 0;
 
         if (material->has_pbr_specular_glossiness) {
-            if  (material->pbr_specular_glossiness.diffuse_texture.texture) {
-                mat.albedo = GetTextureIndexFromTextureView(&material->pbr_specular_glossiness.diffuse_texture);
-            }
-            LV_ASSERT(mat.albedo < gResourceSystem->textureCount);
-            float *diffuseFactor = material->pbr_specular_glossiness.diffuse_factor;
-            memcpy(mat.diffuseFactor, diffuseFactor, sizeof(mat.diffuseFactor));
-
-            if (material->pbr_specular_glossiness.specular_glossiness_texture.texture) {
-                mat.specular = GetTextureIndexFromTextureView(&material->pbr_specular_glossiness.specular_glossiness_texture);
-            }
-            float *specularFactor = material->pbr_specular_glossiness.specular_factor;
-            memcpy(mat.specularFactor, specularFactor, sizeof(mat.specularFactor));
+            LV_ASSERT(false && "We don't support specular glossiness");
         } else if (material->has_pbr_metallic_roughness) {
             if (material->pbr_metallic_roughness.base_color_texture.texture) {
                 mat.albedo = GetTextureIndexFromTextureView(&material->pbr_metallic_roughness.base_color_texture);
@@ -523,18 +498,19 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
             memcpy(mat.diffuseFactor, baseColorFactor, sizeof(mat.diffuseFactor)); 
 
             if (material->pbr_metallic_roughness.metallic_roughness_texture.texture) {
-                mat.specular = GetTextureIndexFromTextureView(&material->pbr_metallic_roughness.metallic_roughness_texture);
+                mat.metalRoughness = GetTextureIndexFromTextureView(&material->pbr_metallic_roughness.metallic_roughness_texture);
             }
 
-            mat.specularFactor[0] = 1;
-            mat.specularFactor[1] = 1;
-            mat.specularFactor[2] = 1;
-            mat.specularFactor[3] = 1 - material->pbr_metallic_roughness.roughness_factor;
+            mat.roughnessFactor = material->pbr_metallic_roughness.roughness_factor;
+            mat.metallicFactor  = material->pbr_metallic_roughness.metallic_factor;
+        } else {
+            LV_ASSERT(false && "Unknown material workflow");
         }
 
         if (material->normal_texture.texture) {
             mat.normal = GetTextureIndexFromTextureView(&material->normal_texture);
         }
+        mat.normalScale = material->normal_texture.scale;
 
         if (material->emissive_texture.texture) {
             mat.emissive = GetTextureIndexFromTextureView(&material->emissive_texture);
@@ -542,6 +518,11 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
         mat.emissiveFactor[0] = material->emissive_factor[0];
         mat.emissiveFactor[1] = material->emissive_factor[1];
         mat.emissiveFactor[2] = material->emissive_factor[2];
+
+        if (material->occlusion_texture.texture) {
+            mat.ao = GetTextureIndexFromTextureView(&material->emissive_texture);
+        }
+        mat.aoStrength = material->occlusion_texture.scale;
 
         ArrayPush(gResourceSystem->materials, mat);
     }

@@ -1,3 +1,5 @@
+static const float PI = 3.14159265359;
+
 float3 rotateQuat(float3 v, float4 q)
 {
     return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);

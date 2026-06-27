@@ -54,12 +54,16 @@ typedef struct {
 
 typedef struct {
     u32 albedo;
+    u32 metalRoughness;
     u32 normal;
-    u32 specular;
     u32 emissive;
+    u32 ao;
     f32 diffuseFactor[4];
-    f32 specularFactor[4];
     f32 emissiveFactor[3];
+    f32 metallicFactor;
+    f32 roughnessFactor;
+    f32 aoStrength;
+    f32 normalScale;
 } material_t;
 
 typedef struct {
@@ -111,7 +115,8 @@ typedef struct {
     f32 frustum[4];
     mat4_t projection;
     mat4_t view;
-    vec4_t lightPos;
+    vec3_t lightDir; //sunlight
+    vec3_t camPos;
     u32 selected;
     u32 drawCount;
     f32 lodTarget;

@@ -367,8 +367,6 @@ void VulkanRender(void)
         VulkanLoadResources(gCtx);
     }
 
-    float cameraZ = 100.0f;
-
     VK_CHECK(vkWaitForFences(gCtx->device, 1, &gCtx->fences[gCtx->frameIndex], true, UINT64_MAX));
     VK_CHECK(vkResetFences(gCtx->device, 1, &gCtx->fences[gCtx->frameIndex]));
 
@@ -377,6 +375,7 @@ void VulkanRender(void)
 
     f32 znear = 0.1f;
     f32 zfar = 256.0f;
+    f32 cameraZ = 3.0f;
 
     globals_t globals = {0};
     globals.projection = HMM_Perspective_LH_ZO(HMM_AngleDeg(60.0f), (f32)gCtx->window.w / (f32)gCtx->window.h, znear, zfar);
@@ -396,7 +395,10 @@ void VulkanRender(void)
     globals.frustum[3] = frustumY.Z;
     globals.drawCount = gCtx->drawCount;
     globals.lodTarget = (2 / globals.P11) * (1.0f / (f32)gCtx->window.h);
-    
+    globals.camPos = (vec3_t){0.0f, 0.0f, cameraZ };
+    globals.lightDir = (vec3_t){1.0f, 1.0f, 1.0f};
+    globals.lightDir = HMM_Norm(globals.lightDir);
+
     UploadBuffer(&gCtx->shaderGlobalsBuffers[gCtx->frameIndex], &globals, sizeof(globals_t), 0);
 
     VkCommandBuffer cb = gCtx->commandBuffers[gCtx->frameIndex];
