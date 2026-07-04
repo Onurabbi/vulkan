@@ -28,6 +28,7 @@ typedef struct {
     VkImage image;
     VkImageView view;
     VkImageLayout layout;
+    u32 layerCount;
     u32 textureIndex;
 } texture_resource_t;
 
@@ -67,6 +68,9 @@ typedef struct {
     u32 materialCount;
     u32 shaderCount;
     u32 textureCount;
+
+    // TODO: how to fix this??
+    
 } resource_system_t;
 
 void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity);

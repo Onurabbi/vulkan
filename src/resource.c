@@ -58,12 +58,18 @@ static const char *GetFullPathFromUri(const char *uri, resource_type_t type, mem
 
 static void LoadTexture(resource_t *textureResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
 {
-    textureResource->type = RESOURCE_TYPE_TEXTURE;
     (void)scratchArena;
     (void)permanentArena;
 
+    textureResource->type = RESOURCE_TYPE_TEXTURE;
+    u32 layerCount = 1;
+    // if the name starts with 'cubemap' then it's a cubemap texture
+    if (SDL_strnstr(textureResource->path, "cubemap", SDL_strnlen(textureResource->path, MAX_PATH))) {
+        layerCount = 6;
+    } 
+
     textureResource->texture.textureIndex = gResourceSystem->textureCount - 1;
-    VulkanLoadTexture(textureResource, textureResource->path);
+    VulkanLoadTexture(textureResource, textureResource->path, layerCount);
 }
 
 static void AppendMesh(vertex_t *vertices, u32 *indices, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
@@ -396,7 +402,9 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
     ArrayInitWithArena(primitiveMaterials, scratchArena, primitiveMaterialCount);
 
     size_t firstMeshOffset = ArrayCount(gResourceSystem->meshes);
-
+    //Initialize the first mesh index
+    sceneResource->mesh.firstMeshIndex = firstMeshOffset;
+    
     for (u32 i = 0; i < data->meshes_count; i++) {
         const cgltf_mesh *mesh = &data->meshes[i];
         size_t meshOffset = ArrayCount(gResourceSystem->meshes);
@@ -418,6 +426,10 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
             cgltf_accessor_unpack_indices(prim->indices, indices, 4, ArrayCount(indices));
 
             AppendMesh(vertices, indices, scratchArena, permanentArena);
+            
+            // Each gltf mesh primitive is a mesh for us.
+            sceneResource->mesh.meshCount++;
+
             ArrayPush(primitiveMaterials, prim->material);
         }
 
@@ -467,7 +479,6 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
                     LOGE("No material associated with this mesh");
                 }
                 draw.materialIndex = material ? materialOffset +  (i32)(cgltf_material_index(data, material)) : 0;
-                LV_ASSERT(draw.materialIndex >= 0 && draw.materialIndex < data->materials_count);
                 if (material && material->alpha_mode != cgltf_alpha_mode_opaque) {
                     draw.postPass = 1;
                 }

@@ -9,7 +9,7 @@ void VulkanHotReload(vulkan_context_t *context);
 void VulkanRender(void);
 void VulkanShutdown(void);
 
-void VulkanLoadTexture(resource_t *textureResource, const char *path);
+void VulkanLoadTexture(resource_t *textureResource, const char *path, u32 layerCount);
 void VulkanUnloadTexture(resource_t *textureResource);
 void VulkanLoadShader(resource_t *shaderResource, const char *path, memory_arena_t *scratchArena, memory_arena_t *permanentArena);
 void VulkanUnloadShader(resource_t *shaderResource);

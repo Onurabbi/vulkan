@@ -63,9 +63,8 @@ LV_EXPORT void Render(game_memory_t *gameMemory)
         ArenaFreeToMarker(PermanentArena(i), gameMemory->renderMarkers[i]);
     }
 
-    game_state_t *gameState = (game_state_t *)gameMemory->gameState;
     RendererRender();
-
+    
     // We can release all scratch memory at this point since we don't except any scratch
     // memory to carry over to next frame
     for (u32 i = 0; i < gameMemory->threadCount; i++) {

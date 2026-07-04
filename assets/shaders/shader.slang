@@ -3,7 +3,7 @@
 
 Sampler2D textures[];
 
-[[vk::push_constant]] ShaderData shaderData;
+[[vk::push_constant]] PBRData pbrData;
 
 struct VSOutput {
     float4 position : SV_Position;
@@ -19,13 +19,13 @@ VSOutput main(uint instanceIndex : SV_VulkanInstanceID, uint drawID : SV_DrawInd
 {
     VSOutput output;
 
-    DrawCommand *drawCommands = shaderData.drawCommands;
-    DrawData *drawData        = shaderData.drawData;
-    Globals *globals          = shaderData.globals;
+    DrawCommand *drawCommands = pbrData.drawCommands;
+    DrawData *drawData        = pbrData.drawData;
+    Globals *globals          = pbrData.globals;
     DrawCommand cmd           = drawCommands[drawID];
     DrawData meshDraw         = drawData[cmd.drawId];
-    Mesh mesh                 = shaderData.meshes[meshDraw.meshIndex];
-    Vertex *vertices          = shaderData.vertices;
+    Mesh mesh                 = pbrData.meshes[meshDraw.meshIndex];
+    Vertex *vertices          = pbrData.vertices;
 
     uint vertexIndex = vi + cmd.vertexOffset;
     float3 pos      = float3(vertices[vertexIndex].vx, vertices[vertexIndex].vy, vertices[vertexIndex].vz);
@@ -35,8 +35,8 @@ VSOutput main(uint instanceIndex : SV_VulkanInstanceID, uint drawID : SV_DrawInd
     float3 wpos     = rotateQuat(pos, meshDraw.orientation) * meshDraw.scale + meshDraw.position;
 
     output.position = mul(globals.projection, mul(globals.view, float4(wpos, 1.0f)));
-    output.normal = normal;
-    output.tangent = tangent;
+    output.normal   = normal;
+    output.tangent  = tangent;
     output.uv       = uv;
     output.wPos     = wpos;
     output.drawID   = cmd.drawId;
@@ -96,11 +96,11 @@ float3 GetNormalFromMap(Sampler2D normalMap, float3 normal, float2 uv, float3 wo
 
 [shader("fragment")]
 float4 main(VSOutput input) {
-    DrawData drawData = shaderData.drawData[input.drawID];
-    Material material = shaderData.materials[drawData.materialIndex];
-    Globals *globals = shaderData.globals;
+    DrawData drawData = pbrData.drawData[input.drawID];
+    Material material = pbrData.materials[drawData.materialIndex];
+    Globals *globals = pbrData.globals;
 
-    float3 lightColor = float3(100.0, 100.0, 100.0);
+    float3 lightColor = float3(220.0, 255.0, 110.0);
 
     float3 camPos = globals.camPos;
     float3 view = normalize(camPos - input.wPos);
@@ -143,6 +143,7 @@ float4 main(VSOutput input) {
      * be equal to 1.0 - kS
      */
     float3 kD = float3(1.0) - kS;
+    // nullifying diffuse light because metallic surfaces don't refract light, thus have no diffuse reflections
     kD *= 1.0 - metallic;
 
     float ndotl = max(dot(normal, lightdir), 0.0);

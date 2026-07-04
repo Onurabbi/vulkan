@@ -21,4 +21,5 @@
 #define MAX_MESH_DRAWS (8U * 1024U)
 #define MAX_ANIMATIONS (1U * 1024U)
 #define MAX_SHADERS (32U)
+#define MAX_TEXTURE_SIZE (4096U)
 #endif

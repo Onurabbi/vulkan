@@ -92,11 +92,11 @@ do { \
 
 #define ArrayInitWithArena(arr, a, cap) \
 do { \
-    array_header_t *header = ArenaPushSize((a), sizeof(array_header_t) + (cap) * sizeof(*(arr))); \
-    header->count = 0; \
-    header->capacity = cap; \
-    header->arena = a; \
-    (arr) = (void*)&header[1]; \
+    array_header_t *header_ = ArenaPushSize((a), sizeof(array_header_t) + (cap) * sizeof(*(arr))); \
+    header_->count = 0; \
+    header_->capacity = cap; \
+    header_->arena = a; \
+    (arr) = (void*)&header_[1]; \
 } while(0);
 
 void ArrayFree(void *array);

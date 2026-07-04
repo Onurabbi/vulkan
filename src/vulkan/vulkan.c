@@ -116,9 +116,9 @@ void VulkanUnloadShader(resource_t *shaderResource)
     //do nothing
 }
 
-void VulkanLoadTexture(resource_t *textureResource, const char *path)
+void VulkanLoadTexture(resource_t *textureResource, const char *path, u32 layerCount)
 {
-    if (!CreateTexture(&textureResource->texture, &gCtx->scratchBuffer, gCtx->device, gCtx->allocator, gCtx->commandPool, gCtx->queue, gCtx->texSampler, path)) {
+    if (!CreateTexture(&textureResource->texture, &gCtx->scratchBuffer, gCtx->device, gCtx->allocator, gCtx->commandPool, gCtx->queue, gCtx->texSampler, path, layerCount)) {
         LOGE("Unable to load texture %s", path);
     }
 }
@@ -173,6 +173,8 @@ void VulkanShutdown(void)
     SDL_DestroyWindow(gCtx->window.window);
 
     vkDestroySampler(gCtx->device, gCtx->texSampler, NULL);
+    vkDestroySampler(gCtx->device, gCtx->cubeSampler, NULL);
+    
     vmaDestroyAllocator(gCtx->allocator);
 
     vkDestroyDevice(gCtx->device, NULL);
@@ -287,13 +289,32 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     UploadBuffer(&ctx->materialBuffer, geometry.materials, sizeof(material_t) * materialCount, 0);
 
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        ctx->shaderData[i].globalsAddress = ctx->shaderGlobalsBuffers[i].deviceAddress;
-        ctx->shaderData[i].drawDataAddress = ctx->drawBuffer.deviceAddress;
-        ctx->shaderData[i].meshAddress = ctx->meshBuffer.deviceAddress;
-        ctx->shaderData[i].drawCommandAddress = ctx->drawCommandBuffers[i].deviceAddress;
-        ctx->shaderData[i].drawCommandCountAddress = ctx->drawCommandCountBuffer.deviceAddress;
-        ctx->shaderData[i].materialAddress = ctx->materialBuffer.deviceAddress;
-        ctx->shaderData[i].vertexAddress   = ctx->vertexBuffer.deviceAddress;
+        ctx->pbrData[i].globalsAddress = ctx->shaderGlobalsBuffers[i].deviceAddress;
+        ctx->pbrData[i].drawDataAddress = ctx->drawBuffer.deviceAddress;
+        ctx->pbrData[i].meshAddress = ctx->meshBuffer.deviceAddress;
+        ctx->pbrData[i].drawCommandAddress = ctx->drawCommandBuffers[i].deviceAddress;
+        ctx->pbrData[i].drawCommandCountAddress = ctx->drawCommandCountBuffer.deviceAddress;
+        ctx->pbrData[i].materialAddress = ctx->materialBuffer.deviceAddress;
+        ctx->pbrData[i].vertexAddress   = ctx->vertexBuffer.deviceAddress;
+    }
+
+        // setup skybox push constant data vertex offset
+    resource_t *cubeResource = ResourceSystemGetResource("Cube.gltf");
+    if (cubeResource) {
+        u32 meshIndex = cubeResource->mesh.firstMeshIndex;
+        u32 meshCount = cubeResource->mesh.meshCount;
+        LV_ASSERT(meshIndex < ArrayCount(geometry.meshes));
+        LV_ASSERT(meshCount == 1);
+        u32 vertexOffset = geometry.meshes[meshIndex].vertexOffset;
+        u32 indexOffset  = geometry.meshes[meshIndex].meshLods[0].indexOffset;
+        u32 indexCount   = geometry.meshes[meshIndex].meshLods[0].indexCount;
+        LV_ASSERT(indexCount == 36);
+        for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            ctx->skyboxData[i].vertexOffset  = vertexOffset;
+            ctx->skyboxData[i].indexOffset   = indexOffset;
+            ctx->skyboxData[i].indexCount    = indexCount;
+            ctx->skyboxData[i].vertexAddress = ctx->vertexBuffer.deviceAddress; 
+        }
     }
 
     const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena(0));
@@ -315,11 +336,12 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
 
     ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount);
     ctx->texSampler = CreateTextureSampler(ctx->device);
+    ctx->cubeSampler = CreateCubemapSampler(ctx->device);
 
     VkFormat imageFormat = ctx->swapchainImages[0].format;
     VkFormat depthFormat = ctx->depthImage.format;
-    CreateGraphicsPipeline(&ctx->pipeline, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(shader_data_t), ctx->texLayout);
-    CreateComputePipeline(&ctx->computePipeline, ctx->device, "compute_shader.spv", sizeof(shader_data_t));
+    CreateGraphicsPipeline(&ctx->pipeline, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(pbr_data_t), ctx->texLayout);
+    CreateComputePipeline(&ctx->computePipeline, ctx->device, "compute_shader.spv", sizeof(pbr_data_t));
 
     VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
@@ -373,6 +395,7 @@ void VulkanRender(void)
     u32 imageIndex;
     VK_CHECK(vkAcquireNextImageKHR(gCtx->device, gCtx->swapchain, UINT64_MAX, gCtx->presentSemaphores[gCtx->frameIndex], VK_NULL_HANDLE, &imageIndex));
 
+    //prepare shader constants
     f32 znear = 0.1f;
     f32 zfar = 256.0f;
     f32 cameraZ = 3.0f;
@@ -400,6 +423,11 @@ void VulkanRender(void)
     globals.lightDir = HMM_Norm(globals.lightDir);
 
     UploadBuffer(&gCtx->shaderGlobalsBuffers[gCtx->frameIndex], &globals, sizeof(globals_t), 0);
+
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        gCtx->skyboxData[i].projection = globals.projection;
+        gCtx->skyboxData[i].model      = globals.view;
+    }
 
     VkCommandBuffer cb = gCtx->commandBuffers[gCtx->frameIndex];
 
@@ -488,7 +516,7 @@ void VulkanRender(void)
 
     //dispatch compute shader here
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, gCtx->computePipeline.pipeline);
-    vkCmdPushConstants(cb, gCtx->computePipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
+    vkCmdPushConstants(cb, gCtx->computePipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pbr_data_t), &gCtx->pbrData[gCtx->frameIndex]);
     u32 numWorkgroups = (gCtx->drawCount + 63) / 64;
     vkCmdDispatch(cb, numWorkgroups, 1, 1);
 
@@ -519,7 +547,7 @@ void VulkanRender(void)
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetTex, 0, NULL);
     vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(shader_data_t), &gCtx->shaderData[gCtx->frameIndex]);
+    vkCmdPushConstants(cb, gCtx->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pbr_data_t), &gCtx->pbrData[gCtx->frameIndex]);
 
     vkCmdDrawIndexedIndirectCount(cb, gCtx->drawCommandBuffers[gCtx->frameIndex].buffer, offsetof(draw_command_t, command), gCtx->drawCommandCountBuffer.buffer, 0, gCtx->drawCount, sizeof(draw_command_t));
     vkCmdEndRendering(cb);
@@ -621,7 +649,7 @@ void VulkanRender(void)
         vmaDestroyImage(gCtx->allocator, gCtx->depthImage.image, gCtx->depthImage.allocation);
         vkDestroyImageView(gCtx->device, gCtx->depthImage.view, NULL);
 
-        gCtx->depthImage.image = CreateImage(gCtx->device, gCtx->allocator, gCtx->depthImage.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, gCtx->window.w, gCtx->window.h, 1, &gCtx->depthImage.allocation);
+        gCtx->depthImage.image = CreateImage(gCtx->device, gCtx->allocator, gCtx->depthImage.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, gCtx->window.w, gCtx->window.h, 1, 1, &gCtx->depthImage.allocation);
         gCtx->depthImage.view = CreateImageView(gCtx->device, gCtx->depthImage.image, gCtx->depthImage.format, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
     }
 }
@@ -862,7 +890,7 @@ void VulkanInit(vulkan_context_t *ctx)
     LV_ASSERT(depthFormat != VK_FORMAT_UNDEFINED);
 
     VmaAllocation depthAllocation;
-    ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, ctx->window.w, ctx->window.h, 1, &depthAllocation);
+    ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, ctx->window.w, ctx->window.h, 1, 1, &depthAllocation);
     ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;

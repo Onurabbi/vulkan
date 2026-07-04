@@ -1,7 +1,7 @@
 #include "mesh.glsl"
 #include "math.glsl"
 
-[[vk::push_constant]] ShaderData shaderData;
+[[vk::push_constant]] PBRData shaderData;
 
 [shader("compute")]
 [numthreads(64,1,1)]

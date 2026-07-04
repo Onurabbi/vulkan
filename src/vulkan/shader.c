@@ -362,6 +362,8 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
     VkPipelineRasterizationStateCreateInfo rasterizationState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .lineWidth = 1.0f,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
     };
 
     VkPipelineMultisampleStateCreateInfo multisampleState = {

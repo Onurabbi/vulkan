@@ -83,9 +83,9 @@ typedef struct {
 
 typedef struct {
     u16 vx, vy, vz, vw;
-    u8 nx, ny, nz, nw;
-    u8 tx, ty, tz, tw;
-    u16 u,v;
+    u8  nx, ny, nz, nw;
+    u8  tx, ty, tz, tw;
+    u16 u, v;
 } vertex_t;
 
 typedef struct {
@@ -103,11 +103,11 @@ typedef struct {
 }draw_command_t;
 
 typedef struct {
-    vertex_t *vertices;
-    u32 *indices;
-    mesh_t *meshes;
+    vertex_t    *vertices;
+    u32         *indices;
+    mesh_t      *meshes;
     draw_data_t *draws;
-    material_t *materials;
+    material_t  *materials;
 }geometry_t;
 
 typedef struct {
@@ -123,6 +123,16 @@ typedef struct {
 } globals_t;
 
 typedef struct {
+    mat4_t projection;
+    mat4_t model;
+    VkDeviceAddress vertexAddress;
+    u32 vertexOffset;
+    // required by cpu code, but not by shader code. I still put it here for convenience
+    u32 indexOffset;
+    u32 indexCount; //this is always 36 for a cube
+} skybox_data_t;
+
+typedef struct {
     VkDeviceAddress globalsAddress;
     VkDeviceAddress meshAddress;
     VkDeviceAddress drawCommandAddress;
@@ -130,7 +140,7 @@ typedef struct {
     VkDeviceAddress drawDataAddress;
     VkDeviceAddress materialAddress;
     VkDeviceAddress vertexAddress;
-} shader_data_t;
+} pbr_data_t;
 
 typedef struct {
     VkPipelineLayout pipelineLayout;
@@ -161,6 +171,7 @@ typedef struct {
     VmaAllocator allocator;
     VkDescriptorSetLayout texLayout;
     VkSampler texSampler;
+    VkSampler cubeSampler;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
     VkFence fences[MAX_FRAMES_IN_FLIGHT];
@@ -168,8 +179,8 @@ typedef struct {
     VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES]; //swapchain image count
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffers[MAX_FRAMES_IN_FLIGHT];//max frames in flight
-    shader_data_t shaderData[3];
-    //static compute_data_t gComputeData;
+    pbr_data_t pbrData[MAX_FRAMES_IN_FLIGHT];
+    skybox_data_t skyboxData[MAX_FRAMES_IN_FLIGHT];
     pipeline_t pipeline;
     pipeline_t computePipeline;
     f32 cameraZ;
