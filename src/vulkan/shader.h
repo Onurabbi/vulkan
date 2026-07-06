@@ -11,5 +11,5 @@ void DestroyGraphicsPipeline(pipeline_t *pipeline, VkDevice device);
 
 void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *name, u32 pushConstantSize);
 void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device);
-VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount);
+VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount, b8 descriptorIndexing);
 #endif // VK_SHADER_H

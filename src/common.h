@@ -166,10 +166,10 @@ typedef enum {
 typedef struct {
     b8 (*VulkanGetPresentationSupport)(vulkan_instance_t instance, vulkan_physical_device_t physical_device, u32 queue);
     b8 (*CreateWindow)(void* window, void *arg, const char *title, i32 w, i32 h, u64 flags);
-    void (*PushJob)(void(*jobFunc)(void*, memory_arena_t*, memory_arena_t *), void*);
+    void (*PushJob)(void(*jobFunc)(void*, memory_arena_t*), void*);
     void (*WaitForAllJobs)(void);
-    memory_arena_t *(*PermanentArena)(u32 threadIndex);
-    memory_arena_t *(*ScratchArena)(u32 threadIndex);
+    memory_arena_t *(*PermanentArena)(void);
+    memory_arena_t *(*ScratchArena)(void);
     memory_arena_t *(*StringArena)(void);
     const char *(*ArenaPrintf)(memory_arena_t *arena, const char *fmt, va_list args);
     void *(*ArenaPushSize)(memory_arena_t *arena, u64 size);
@@ -183,8 +183,8 @@ typedef struct {
 typedef struct {
     platform_api_t api;
     void *gameState;
-    u64 updateMarkers[MAX_THREADS]; //where permanent arena should be before update
-    u64 renderMarkers[MAX_THREADS]; //where permanent arena should be before render
+    u64 updateMarker; //where permanent arena should be before update
+    u64 renderMarker; //where permanent arena should be before render
     u32 threadCount;
 } game_memory_t;
 

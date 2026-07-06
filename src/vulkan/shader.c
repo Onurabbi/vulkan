@@ -14,6 +14,7 @@
 #endif
 
 #include <stdio.h>
+#include <string.h>
 #include <SDL3/SDL_filesystem.h>
 
 #include "../resource.h"
@@ -175,7 +176,7 @@ void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *ar
     }
 }
 
-VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount)
+VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount, b8 descriptorIndexing)
 {
     VkDescriptorSetLayout result;
     //descriptor set layout for indexing.
@@ -194,7 +195,7 @@ VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorTyp
 
     VkDescriptorSetLayoutCreateInfo descLayoutTexCI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .pNext = &descBindingFlags,
+        .pNext = descriptorIndexing ? &descBindingFlags : NULL,
         .bindingCount = 1,
         .pBindings = &descLayoutBindingTex
     };
@@ -270,6 +271,14 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
 
     LV_ASSERT((shaderResource->shader.stage & VK_SHADER_STAGE_VERTEX_BIT) && (shaderResource->shader.stage & VK_SHADER_STAGE_FRAGMENT_BIT));
 
+    VkBool32 depthWriteEnable = true;
+    VkCullModeFlags cullMode = VK_CULL_MODE_BACK_BIT;
+
+    if (SDL_strnstr(name, "skybox", SDL_strnlen(name, MAX_PATH))) {
+        depthWriteEnable = false;
+        cullMode = VK_CULL_MODE_NONE;
+    }
+
     VkShaderModuleCreateInfo shaderModuleCI = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = ArrayCount(shaderResource->shader.spirv),
@@ -326,7 +335,7 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
         .scissorCount = 1,
     };
 
-    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineDynamicStateCreateInfo dynamicState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
         .dynamicStateCount = 2,
@@ -337,11 +346,11 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
     VkPipelineDepthStencilStateCreateInfo depthStencilState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = VK_TRUE,
-        .depthWriteEnable = VK_TRUE,
+        .depthWriteEnable = depthWriteEnable,
         .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
     };
 
-    VkFormat colorImageFormats[1] = {colorFormat};
+    VkFormat colorImageFormats[1] = { colorFormat };
     VkPipelineRenderingCreateInfo renderingCI = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 1,
@@ -363,7 +372,7 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .lineWidth = 1.0f,
         .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .cullMode = cullMode,
     };
 
     VkPipelineMultisampleStateCreateInfo multisampleState = {

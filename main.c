@@ -34,14 +34,9 @@ typedef struct {
 } vulkan_window_t;
 
 #define GAME_MEMORY_SIZE GIGABYTES(4)
-#define ARENA_BOOTSTRAP(base, arena, cap) \
-do { \
-    ArenaInit((base), (arena), (cap)); \
-    (base) += ARENA_BOOTSTRAP_SIZE((cap)); \
-} while(0)
 
 typedef struct {
-    void (*jobFunc)(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena);
+    void (*jobFunc)(void *data, memory_arena_t *scratchArena);
     void *data;
 } job_t;
 
@@ -56,7 +51,6 @@ static SDL_SharedObject *gameLib;
 
 static SDL_Thread *workerThreads[MAX_THREADS];
 static u32 threadIndices[MAX_THREADS];
-static memory_arena_t *scratchArenas;
 static u32 threadCount;
 
 static SDL_Mutex *mutex;
@@ -66,12 +60,14 @@ static u32 jobCount;
 static u32 activeJobCount;
 static b8 shutdownFlag;
 
-static memory_arena_t permanentArenas[MAX_THREADS];
+static memory_arena_t permanentArena;
 static memory_arena_t stringArena;
-static memory_arena_t *scratchArenas; //threadCount + 1;
+static memory_arena_t scratchArenas[MAX_THREADS]; //threadCount + 1;
 static u32 arenaCount;
 
 static u32 reloadIndex = 0;
+
+static _Thread_local u32 threadIndex = 0;
 
 static void ArenaFreeToMarker(memory_arena_t *arena, u64 marker)
 {
@@ -106,14 +102,13 @@ static const char *ArenaPrintf(memory_arena_t *arena, const char *fmt, va_list a
     return buffer;
 }
 
-static memory_arena_t *PermanentArena(u32 threadIndex)
+static memory_arena_t *PermanentArena(void)
 {
-    return &permanentArenas[threadIndex];
+    return &permanentArena;
 }
 
-static memory_arena_t *ScratchArena(u32 threadIndex)
+static memory_arena_t *ScratchArena(void)
 {
-    LV_ASSERT(threadIndex < arenaCount);
     return &scratchArenas[threadIndex];
 }
 
@@ -157,7 +152,7 @@ static void KillWorkerThreads(void)
 
 static i32 WorkerThreadFunc(void *data)
 {
-    u32 threadIndex = *(u32*)data;
+    threadIndex = *(u32*)data;
     LOGI("Worker thread %u started", threadIndex);
 
     //worker thread main loop
@@ -186,7 +181,7 @@ static i32 WorkerThreadFunc(void *data)
         SDL_BroadcastCondition(cond); 
         SDL_UnlockMutex(mutex);
 
-        job.jobFunc(job.data, &scratchArenas[threadIndex], &permanentArenas[threadIndex]);
+        job.jobFunc(job.data, &scratchArenas[threadIndex]);
 
         SDL_LockMutex(mutex);
         activeJobCount--;
@@ -199,7 +194,7 @@ static i32 WorkerThreadFunc(void *data)
     return 0;
 }
 
-static void PushJob(void (*jobFunc)(void *data, memory_arena_t *scratchArena, memory_arena_t *permanentArena), void *data)
+static void PushJob(void (*jobFunc)(void *data, memory_arena_t *scratchArena), void *data)
 {
     SDL_LockMutex(mutex);
     while (jobCount >= MAX_JOBS) {
@@ -296,6 +291,7 @@ static b8 LoadGameLibrary(const char *path, SDL_SharedObject *oldHandle)
     }
 
     SDL_UnloadObject(oldHandle);
+    
     gameLib = NULL;
     GameUpdate = NULL;
     GameRender = NULL;
@@ -354,21 +350,23 @@ int main(int argc, char *argv[])
     game_memory_t *gameMemory = (game_memory_t *)memoryBlock;
     u8* ptr = (u8*)(memoryBlock + sizeof(*gameMemory));
 
-    //Initialise all arenas
-    ARENA_BOOTSTRAP(ptr, PermanentArena(0), MAIN_PERMANENT_ARENA_CAPACITY);
+    threadIndex = 0;
     arenaCount = threadCount + 1;
 
+    ArenaInit(ptr, &permanentArena, MAIN_PERMANENT_ARENA_CAPACITY);
+    ptr += MAIN_PERMANENT_ARENA_CAPACITY;
+
+    ArenaInit(ptr, &scratchArenas[0], MAIN_SCRATCH_ARENA_CAPACITY);
+    ptr += MAIN_SCRATCH_ARENA_CAPACITY;
+
     for (u32 i = 1; i < arenaCount; i++) {
-        ARENA_BOOTSTRAP(ptr, PermanentArena(i), WORKER_PERMANENT_ARENA_CAPACITY);
+        ArenaInit(ptr, &scratchArenas[i], WORKER_SCRATCH_ARENA_CAPACITY);
+        ptr += WORKER_SCRATCH_ARENA_CAPACITY;
     }
 
-    scratchArenas = PushArray(PermanentArena(0), arenaCount, memory_arena_t);
-    ARENA_BOOTSTRAP(ptr, ScratchArena(0), MAIN_SCRATCH_ARENA_CAPACITY);
-    for (u32 i = 1; i < arenaCount; i++) {
-        ARENA_BOOTSTRAP(ptr, ScratchArena(i), WORKER_SCRATCH_ARENA_CAPACITY);
-    }
+    ArenaInit(ptr, &stringArena, STRING_ARENA_CAPACITY);
+    ptr += STRING_ARENA_CAPACITY;
 
-    ARENA_BOOTSTRAP(ptr, &stringArena, STRING_ARENA_CAPACITY);
     LOGI("Total memory used by the game: %zu", (u64)ptr - (u64)memoryBlock);
 
     gameMemory->api.vulkanInstanceExtensions = SDL_Vulkan_GetInstanceExtensions(&gameMemory->api.vulkanInstanceExtensionCount);
@@ -387,10 +385,8 @@ int main(int argc, char *argv[])
     gameMemory->api.rendererType = RENDERER_TYPE_VULKAN;
 #endif
     gameMemory->threadCount = threadCount;
-    for (u32 i = 0; i < threadCount; i++) {
-        gameMemory->renderMarkers[0] = 0;
-        gameMemory->updateMarkers[0] = 0;
-    }
+    gameMemory->renderMarker = 0;
+    gameMemory->updateMarker = 0;
 
     //Init threads
     mutex = SDL_CreateMutex();
@@ -408,7 +404,8 @@ int main(int argc, char *argv[])
     }
 
     for (u32 i = 1; i <= threadCount; i++) {
-        workerThreads[i - 1] = SDL_CreateThread(WorkerThreadFunc, "WorkerThread", &i);
+        threadIndices[i - 1] = i;
+        workerThreads[i - 1] = SDL_CreateThread(WorkerThreadFunc, "WorkerThread", &threadIndices[i - 1]);
         if (!workerThreads[i - 1]) {
             LOGE("Failed to create thread: %u: %s", i, SDL_GetError());
             retCode = -RETCODE_THREADING_INIT;
@@ -441,6 +438,10 @@ int main(int argc, char *argv[])
     u64 prev = SDL_GetPerformanceCounter();
     f64 accumulator = 1 / 59.0; // Hack to be able to update on the first frame before rendering
     f64 libraryLoadTimer = 0;
+
+    // Initialize the update and render markers for the first time
+    gameMemory->updateMarker = 0;
+    gameMemory->renderMarker = 0;
 
     while (!gameInput.quit) {
         u64 now = SDL_GetPerformanceCounter();
@@ -483,9 +484,13 @@ int main(int argc, char *argv[])
                 }
             }
 
+            ArenaFreeToMarker(&permanentArena, gameMemory->updateMarker);
+
             if (GameUpdate) {
                 GameUpdate(gameMemory, &gameInput);
             }
+
+            gameMemory->renderMarker = ArenaGetMarker(&permanentArena);
 
             accumulator -= deltaTime;
             if (accumulator < 0) accumulator = 0;
@@ -506,6 +511,12 @@ int main(int argc, char *argv[])
         if (GameRender) {
             GameRender(gameMemory);
         }
+
+        // We can release all scratch memory at this point since we don't except any scratch
+        // memory to carry over to next frame
+        for (u32 i = 0; i < gameMemory->threadCount; i++) {
+            ArenaFreeToMarker(&scratchArenas[i], 0);
+        }
     }
 
     if (GameShutdown) {
@@ -516,10 +527,12 @@ exit:
     WaitForAllJobs();
     KillWorkerThreads();
     
+    ArenaDeinit(&permanentArena);
+
     for (u32 i = 0; i < arenaCount; i++) {
         ArenaDeinit(&scratchArenas[i]);
-        ArenaDeinit(&permanentArenas[i]);
     }
+
     ArenaDeinit(&stringArena);
 
     if (mutex) SDL_DestroyMutex(mutex);

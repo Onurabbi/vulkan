@@ -135,9 +135,11 @@ void VulkanShutdown(void)
     VK_CHECK(vkDeviceWaitIdle(gCtx->device));
 
     DestroyGraphicsPipeline(&gCtx->pipeline, gCtx->device);
+    DestroyGraphicsPipeline(&gCtx->skyboxPipeline, gCtx->device);
     DestroyComputePipeline(&gCtx->computePipeline, gCtx->device);
 
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->texLayout, NULL);
+    vkDestroyDescriptorSetLayout(gCtx->device, gCtx->skyboxLayout, NULL);
     vkDestroyDescriptorPool(gCtx->device, gCtx->descriptorPool, NULL);
     vkDestroyCommandPool(gCtx->device, gCtx->commandPool, NULL);
 
@@ -173,7 +175,7 @@ void VulkanShutdown(void)
     SDL_DestroyWindow(gCtx->window.window);
 
     vkDestroySampler(gCtx->device, gCtx->texSampler, NULL);
-    vkDestroySampler(gCtx->device, gCtx->cubeSampler, NULL);
+    vkDestroySampler(gCtx->device, gCtx->skyboxSampler, NULL);
     
     vmaDestroyAllocator(gCtx->allocator);
 
@@ -298,11 +300,11 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         ctx->pbrData[i].vertexAddress   = ctx->vertexBuffer.deviceAddress;
     }
 
-        // setup skybox push constant data vertex offset
-    resource_t *cubeResource = ResourceSystemGetResource("Cube.gltf");
-    if (cubeResource) {
-        u32 meshIndex = cubeResource->mesh.firstMeshIndex;
-        u32 meshCount = cubeResource->mesh.meshCount;
+    // setup skybox push constant data vertex offset
+    resource_t *skyboxResource = ResourceSystemGetResource("Cube.gltf");
+    if (skyboxResource) {
+        u32 meshIndex = skyboxResource->mesh.firstMeshIndex;
+        u32 meshCount = skyboxResource->mesh.meshCount;
         LV_ASSERT(meshIndex < ArrayCount(geometry.meshes));
         LV_ASSERT(meshCount == 1);
         u32 vertexOffset = geometry.meshes[meshIndex].vertexOffset;
@@ -317,32 +319,36 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         }
     }
 
-    const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena(0));
+    const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena());
     u32 texCount = ArrayCount(textureResources);
 
-    VkDescriptorPoolSize poolSize = {
-        .type =  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = texCount,
+    VkDescriptorPoolSize poolSizes[2] = { 
+        { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,.descriptorCount = texCount }, 
+        { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1 }
     };
 
     VkDescriptorPoolCreateInfo descPoolCI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = 1,
-        .poolSizeCount = 1,
-        .pPoolSizes = &poolSize,
+        .maxSets = 2,
+        .poolSizeCount = 2,
+        .pPoolSizes = poolSizes
     };
 
     VK_CHECK(vkCreateDescriptorPool(ctx->device, &descPoolCI, NULL, &ctx->descriptorPool));
 
-    ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount);
+    ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount, true);
+    ctx->skyboxLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1, false);
+
     ctx->texSampler = CreateTextureSampler(ctx->device);
-    ctx->cubeSampler = CreateCubemapSampler(ctx->device);
+    ctx->skyboxSampler = CreateCubemapSampler(ctx->device);
 
     VkFormat imageFormat = ctx->swapchainImages[0].format;
     VkFormat depthFormat = ctx->depthImage.format;
     CreateGraphicsPipeline(&ctx->pipeline, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(pbr_data_t), ctx->texLayout);
+    CreateGraphicsPipeline(&ctx->skyboxPipeline, ctx->device, "skybox.spv", imageFormat, depthFormat, sizeof(skybox_data_t), ctx->skyboxLayout);
     CreateComputePipeline(&ctx->computePipeline, ctx->device, "compute_shader.spv", sizeof(pbr_data_t));
 
+    // Descriptor indexing for textures
     VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
         .descriptorSetCount = 1,
@@ -360,7 +366,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     VK_CHECK(vkAllocateDescriptorSets(ctx->device, &texDescSetAlloc, &ctx->descriptorSetTex));
 
     VkDescriptorImageInfo *textureDescriptors = NULL;
-    ArrayInitWithArena(textureDescriptors, ScratchArena(0), texCount);
+    ArrayInitWithArena(textureDescriptors, ScratchArena(), texCount);
 
     for (u32 i = 0; i < texCount; i++) {
         VkDescriptorImageInfo info = {0};
@@ -381,6 +387,42 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     };
 
     vkUpdateDescriptorSets(ctx->device, 1, &writeDescSet, 0, NULL);
+
+    // Descriptor for skybox shader
+    resource_t *skyboxTextureResource = ResourceSystemGetResource("cubemap_aarfontein.dds");
+    if (!skyboxTextureResource) {
+        LOGE("Unable to find skybox texture resource");
+        return;
+    }
+
+    VkDescriptorSetAllocateInfo skyboxDescAllocInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = NULL,
+        .descriptorPool = ctx->descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &ctx->skyboxLayout
+    };
+
+    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &skyboxDescAllocInfo, &ctx->descriptorSetSkybox));
+    
+    VkDescriptorImageInfo skyboxImageInfo = {
+        .imageLayout = skyboxTextureResource->texture.layout,
+        .imageView   = skyboxTextureResource->texture.view,
+        .sampler     = ctx->skyboxSampler
+    };
+
+    VkWriteDescriptorSet skyboxWriteDescSet = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = ctx->descriptorSetSkybox,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &skyboxImageInfo
+    };
+
+    vkUpdateDescriptorSets(ctx->device, 1, &skyboxWriteDescSet, 0, NULL);
 }
 
 void VulkanRender(void)
@@ -424,9 +466,14 @@ void VulkanRender(void)
 
     UploadBuffer(&gCtx->shaderGlobalsBuffers[gCtx->frameIndex], &globals, sizeof(globals_t), 0);
 
+    mat4_t skyboxView = globals.view;
+    skyboxView.Elements[3][0] = 0.0f;
+    skyboxView.Elements[3][1] = 0.0f;
+    skyboxView.Elements[3][2] = 0.0f;
+
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         gCtx->skyboxData[i].projection = globals.projection;
-        gCtx->skyboxData[i].model      = globals.view;
+        gCtx->skyboxData[i].model      = skyboxView;
     }
 
     VkCommandBuffer cb = gCtx->commandBuffers[gCtx->frameIndex];
@@ -514,7 +561,7 @@ void VulkanRender(void)
         .pDepthAttachment = &depthAttachmentInfo,
     };
 
-    //dispatch compute shader here
+    // Dispatch compute shader here
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, gCtx->computePipeline.pipeline);
     vkCmdPushConstants(cb, gCtx->computePipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pbr_data_t), &gCtx->pbrData[gCtx->frameIndex]);
     u32 numWorkgroups = (gCtx->drawCount + 63) / 64;
@@ -543,6 +590,12 @@ void VulkanRender(void)
     };
 
     vkCmdSetScissor(cb, 0, 1, &scissor);
+
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->skyboxPipeline.pipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->skyboxPipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetSkybox, 0, NULL);
+    vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(cb, gCtx->skyboxPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(skybox_data_t), &gCtx->skyboxData[gCtx->frameIndex]);
+    vkCmdDrawIndexed(cb, gCtx->skyboxData[gCtx->frameIndex].indexCount, 1, gCtx->skyboxData[gCtx->frameIndex].indexOffset, gCtx->skyboxData[gCtx->frameIndex].vertexOffset, 0);
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->pipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetTex, 0, NULL);
@@ -642,7 +695,7 @@ void VulkanRender(void)
         VkFormat format = gCtx->swapchainImages[0].format;
         for (u32 i = 0; i < gCtx->swapchainImageCount; i++) {
             gCtx->swapchainImages[i].image = images[i];
-            gCtx->swapchainImages[i].view = CreateImageView(gCtx->device, images[i], format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            gCtx->swapchainImages[i].view = CreateImageView(gCtx->device, images[i], format, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
         }
 
         vkDestroySwapchainKHR(gCtx->device, swapchainCI.oldSwapchain, NULL);
@@ -650,14 +703,14 @@ void VulkanRender(void)
         vkDestroyImageView(gCtx->device, gCtx->depthImage.view, NULL);
 
         gCtx->depthImage.image = CreateImage(gCtx->device, gCtx->allocator, gCtx->depthImage.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, gCtx->window.w, gCtx->window.h, 1, 1, &gCtx->depthImage.allocation);
-        gCtx->depthImage.view = CreateImageView(gCtx->device, gCtx->depthImage.image, gCtx->depthImage.format, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+        gCtx->depthImage.view = CreateImageView(gCtx->device, gCtx->depthImage.image, gCtx->depthImage.format, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1);
     }
 }
 
 void VulkanHotReload(vulkan_context_t *ctx)
 {
     gCtx = ctx;
-    //reinitialize volk
+    // Reinitialize volk
     if (volkInitialize() != VK_SUCCESS) {
         LOGF("Unable to initialize volk");
         return;
@@ -864,7 +917,7 @@ void VulkanInit(vulkan_context_t *ctx)
 
     for (u32 i = 0; i < swapchainImageCount; i++) {
         ctx->swapchainImages[i].image = swapchainImages[i];
-        ctx->swapchainImages[i].view = CreateImageView(ctx->device, ctx->swapchainImages[i].image, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+        ctx->swapchainImages[i].view = CreateImageView(ctx->device, ctx->swapchainImages[i].image, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
         ctx->swapchainImages[i].allocation = NULL;
         ctx->swapchainImages[i].format = imageFormat;
     }
@@ -891,7 +944,7 @@ void VulkanInit(vulkan_context_t *ctx)
 
     VmaAllocation depthAllocation;
     ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, ctx->window.w, ctx->window.h, 1, 1, &depthAllocation);
-    ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+    ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1);
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;
 

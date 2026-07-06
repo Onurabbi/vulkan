@@ -39,7 +39,7 @@ b8 PlatformCreateWindow(void* window, void *arg, const char *title, i32 w, i32 h
     return platformApi->CreateWindow(window, arg, title, w, h, flags);
 }
 
-void PushJob(void(*jobFunc)(void*, memory_arena_t *, memory_arena_t *), void* data)
+void PushJob(void(*jobFunc)(void*, memory_arena_t *), void* data)
 {
     platformApi->PushJob(jobFunc, data);
 }
@@ -49,9 +49,9 @@ void WaitForAllJobs(void)
     platformApi->WaitForAllJobs();
 }
 
-memory_arena_t *ScratchArena(u32 tid)
+memory_arena_t *ScratchArena(void)
 {
-    return platformApi->ScratchArena(tid);
+    return platformApi->ScratchArena();
 }
 
 memory_arena_t *StringArena(void)
@@ -59,9 +59,9 @@ memory_arena_t *StringArena(void)
     return platformApi->StringArena();
 }
 
-memory_arena_t *PermanentArena(u32 threadIndex)
+memory_arena_t *PermanentArena(void)
 {
-    return platformApi->PermanentArena(threadIndex);
+    return platformApi->PermanentArena();
 }
 
 void *ArenaPushSize(memory_arena_t *arena, u64 size)

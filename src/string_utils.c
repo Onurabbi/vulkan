@@ -27,7 +27,7 @@ const char *StringIntern(const char *str)
 void StringUtilsInit(string_interning_system_t *system)
 {
     gSystem = system;
-    HashMapInitWithArena(&gSystem->map, PermanentArena(0), MAX_STRING_COUNT);
+    HashMapInitWithArena(&gSystem->map, PermanentArena(), MAX_STRING_COUNT);
     PushString("");
 }
 

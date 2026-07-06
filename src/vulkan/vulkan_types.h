@@ -170,10 +170,12 @@ typedef struct {
     buffer_t scratchBuffer;
     VmaAllocator allocator;
     VkDescriptorSetLayout texLayout;
+    VkDescriptorSetLayout skyboxLayout;
     VkSampler texSampler;
-    VkSampler cubeSampler;
+    VkSampler skyboxSampler;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
+    VkDescriptorSet descriptorSetSkybox;
     VkFence fences[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore presentSemaphores[MAX_FRAMES_IN_FLIGHT];//max frames in flight
     VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES]; //swapchain image count
@@ -182,6 +184,7 @@ typedef struct {
     pbr_data_t pbrData[MAX_FRAMES_IN_FLIGHT];
     skybox_data_t skyboxData[MAX_FRAMES_IN_FLIGHT];
     pipeline_t pipeline;
+    pipeline_t skyboxPipeline;
     pipeline_t computePipeline;
     f32 cameraZ;
     u32 frameIndex;

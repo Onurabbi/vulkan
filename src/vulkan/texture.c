@@ -229,7 +229,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 	    goto exit;
 	}
 
-    texture->view = CreateImageView(device, texture->image, format, VK_IMAGE_ASPECT_COLOR_BIT, header.dwMipMapCount);
+    texture->view = CreateImageView(device, texture->image, format, VK_IMAGE_ASPECT_COLOR_BIT, header.dwMipMapCount, layerCount);
     VkFenceCreateInfo fenceOneTimeCI = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     };
@@ -274,34 +274,58 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 
     vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
 
-    size_t bufferOffset = 0;
-    u32 mipWidth = header.dwWidth / layerCount;
-    u32 mipHeight = header.dwHeight;
+    size_t levelStartOffset = 0;
+    u32 curMipWidth = header.dwWidth;
+    u32 curMipHeight = header.dwHeight;
 
-    VkBufferImageCopy copyRegions[6 * 12];
+    // Allocate enough space for all copy regions (e.g. up to 13 mips * 6 faces = 78 regions)
+    VkBufferImageCopy copyRegions[256];
+    u32 regionIndex = 0;
+
     for (u32 level = 0; level < header.dwMipMapCount; level++) {
-        for (u32 layer = 0; layer < layerCount; layer++) {
-            VkBufferImageCopy bufferCopyRegion = {0};
-            bufferCopyRegion.bufferOffset = bufferOffset;
-            bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            bufferCopyRegion.imageSubresource.mipLevel = level;
-            bufferCopyRegion.imageSubresource.baseArrayLayer = layer;
-            bufferCopyRegion.imageSubresource.layerCount = 1;
-            bufferCopyRegion.imageExtent.width = mipWidth;
-            bufferCopyRegion.imageExtent.height = mipHeight;
-            bufferCopyRegion.imageExtent.depth = 1;
-            copyRegions[level * layerCount + layer] = bufferCopyRegion;
-
-            bufferOffset += ((mipWidth + 3) / 4) * ((mipHeight + 3) / 4) * blockSize;
+        u32 faceWidth = curMipWidth / layerCount;
+        if (faceWidth == 0) {
+            faceWidth = 1;
         }
-        mipWidth  = mipWidth > 1 ? mipWidth / 2 : 1;
-        mipHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+        u32 faceHeight = curMipHeight;
+
+        // Size in blocks for a single face's width
+        size_t faceBlockWidth = (faceWidth + 3) / 4;
+
+        for (u32 layer = 0; layer < layerCount; layer++) {
+            VkBufferImageCopy bufferCopyRegion = {0}; 
+            
+            // Calculate starting offset for this specific face column in the current level
+            bufferCopyRegion.bufferOffset = levelStartOffset + (layer * faceBlockWidth * blockSize);
+            
+            bufferCopyRegion.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            bufferCopyRegion.imageSubresource.mipLevel       = level;
+            bufferCopyRegion.imageSubresource.baseArrayLayer = layer;
+            bufferCopyRegion.imageSubresource.layerCount     = 1;
+            
+            bufferCopyRegion.imageExtent.width  = faceWidth;
+            bufferCopyRegion.imageExtent.height = faceHeight;
+            bufferCopyRegion.imageExtent.depth  = 1;
+            
+            // bufferRowLength is the total row width in texels in the buffer
+            bufferCopyRegion.bufferRowLength    = curMipWidth;
+            bufferCopyRegion.bufferImageHeight  = curMipHeight;
+            
+            copyRegions[regionIndex++] = bufferCopyRegion;
+        }
+
+        // Advance the level start offset by the total size of the current level's strip
+        levelStartOffset += ((curMipWidth + 3) / 4) * ((curMipHeight + 3) / 4) * blockSize;
+
+        // Scale down dimensions for the next mip level
+        curMipWidth  = curMipWidth > 1 ? curMipWidth / 2 : 1;
+        curMipHeight = curMipHeight > 1 ? curMipHeight / 2 : 1;
     }
 
     u32 copyCount = header.dwMipMapCount * layerCount;
     vkCmdCopyBufferToImage(cbOneTime, scratch->buffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copyCount, copyRegions);
 
-    LV_ASSERT(bufferOffset == imageSize);
+    LV_ASSERT(levelStartOffset == imageSize);
 
     VkImageMemoryBarrier2 barrierTexRead = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -391,16 +415,19 @@ VkSampler CreateCubemapSampler(VkDevice device)
     return result;
 }
 
-VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, u32 mipLevels)
+VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, u32 mipLevels, u32 layerCount)
 {
     VkImageViewCreateInfo viewCI = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .viewType = layerCount == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_CUBE,
         .format = format,
-        .subresourceRange.aspectMask = aspect,
-        .subresourceRange.levelCount = mipLevels,
-        .subresourceRange.layerCount = 1,
+        .subresourceRange.aspectMask     = aspect,
+        .subresourceRange.baseMipLevel   = 0,
+        .subresourceRange.levelCount     = mipLevels,
+        .subresourceRange.baseArrayLayer = 0,
+        .subresourceRange.layerCount     = layerCount,
+
     };
 
     VkImageView view;
