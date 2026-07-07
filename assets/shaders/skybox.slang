@@ -20,7 +20,7 @@ VSOutput main(uint vi: SV_VertexID)
 
     float3 pos = float3(vertices[vertexIndex].vx, vertices[vertexIndex].vy, vertices[vertexIndex].vz);
     output.uvw = pos;
-    output.uvw.xy *= -1.0;
+    //output.uvw.xy *= -1.0;
 
     // Remove translation from view matrix
     float4x4 view = skyboxData.model;

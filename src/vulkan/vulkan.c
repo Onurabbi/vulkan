@@ -444,7 +444,7 @@ void VulkanRender(void)
 
     globals_t globals = {0};
     globals.projection = HMM_Perspective_LH_ZO(HMM_AngleDeg(60.0f), (f32)gCtx->window.w / (f32)gCtx->window.h, znear, zfar);
-    globals.view = HMM_LookAt_LH((vec3_t){0.0f, 0.0f, cameraZ}, (vec3_t){0.0f, 0.0f, 0.0f}, (vec3_t){0.0f, -1.0f, 0.0f});
+    globals.view = HMM_LookAt_LH((vec3_t){0.0f, cameraZ, -0.0f}, (vec3_t){0.0f, 0.0f, 0.0f}, (vec3_t){0.0f, -1.0f, 0.0f});
 
     mat4_t projectionT = HMM_TransposeM4(globals.projection);
     vec4_t frustumX = HMM_Norm(HMM_Add(projectionT.Columns[3], projectionT.Columns[0]));
