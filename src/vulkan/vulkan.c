@@ -12,6 +12,7 @@
 #include "../log.h"
 #include "../limits.h"
 #include "../resource.h"
+#include "../renderer.h"
 
 #include <stdio.h>
 #include <SDL3/SDL.h>
@@ -438,13 +439,9 @@ void VulkanRender(void)
     VK_CHECK(vkAcquireNextImageKHR(gCtx->device, gCtx->swapchain, UINT64_MAX, gCtx->presentSemaphores[gCtx->frameIndex], VK_NULL_HANDLE, &imageIndex));
 
     //prepare shader constants
-    f32 znear = 0.1f;
-    f32 zfar = 256.0f;
-    f32 cameraZ = 3.0f;
-
     globals_t globals = {0};
-    globals.projection = HMM_Perspective_LH_ZO(HMM_AngleDeg(60.0f), (f32)gCtx->window.w / (f32)gCtx->window.h, znear, zfar);
-    globals.view = HMM_LookAt_LH((vec3_t){0.0f, cameraZ, -0.0f}, (vec3_t){0.0f, 0.0f, 0.0f}, (vec3_t){0.0f, -1.0f, 0.0f});
+    globals.projection = RendererGetProjectionMatrix();
+    globals.view = RendererGetViewMatrix();
 
     mat4_t projectionT = HMM_TransposeM4(globals.projection);
     vec4_t frustumX = HMM_Norm(HMM_Add(projectionT.Columns[3], projectionT.Columns[0]));
@@ -452,15 +449,15 @@ void VulkanRender(void)
 
     globals.P00 = globals.projection.Elements[0][0];
     globals.P11 = globals.projection.Elements[1][1];
-    globals.near = znear;
-    globals.far = zfar;
+    globals.near = RendererGetCameraNear();
+    globals.far  = RendererGetCameraFar();
     globals.frustum[0] = frustumX.X;
     globals.frustum[1] = frustumX.Z;
     globals.frustum[2] = frustumY.Y;
     globals.frustum[3] = frustumY.Z;
     globals.drawCount = gCtx->drawCount;
     globals.lodTarget = (2 / globals.P11) * (1.0f / (f32)gCtx->window.h);
-    globals.camPos = (vec3_t){0.0f, 0.0f, cameraZ };
+    globals.camPos = RendererGetCameraPosition();
     globals.lightDir = (vec3_t){1.0f, 1.0f, 1.0f};
     globals.lightDir = HMM_Norm(globals.lightDir);
 

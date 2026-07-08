@@ -1,4 +1,5 @@
 #include "mesh.glsl"
+#include "math.glsl"
 
 [[vk::push_constant]] SkyboxData skyboxData;
 
@@ -35,6 +36,6 @@ VSOutput main(uint vi: SV_VertexID)
 [shader("fragment")]
 float4 main(VSOutput input)
 {
-    return skyboxTexture.Sample(input.uvw);
+    return fromsrgb(skyboxTexture.Sample(input.uvw));
 }
 

@@ -8,6 +8,7 @@ static renderer_t *gRenderer;
 
 void RendererInit(renderer_t *renderer)
 {
+    CameraInit(&renderer->camera, (vec3_t){ -3.0f, -3.0f, 0.0f }, (vec3_t){ 0.0f, 0.0f, -1.0f }, ASPECT_RATIO);
     renderer->type = GetRendererType();
     switch (renderer->type) {
         case RENDERER_TYPE_VULKAN:
@@ -52,4 +53,29 @@ void RendererRender(void)
         default:
             LOGF("Unsupported renderer type");
     }
+}
+
+mat4_t RendererGetProjectionMatrix(void)
+{
+    return CameraGetProjectionMatrix(&gRenderer->camera);
+}
+
+mat4_t RendererGetViewMatrix(void)
+{
+    return CameraGetViewMatrix(&gRenderer->camera);
+}
+
+vec3_t RendererGetCameraPosition(void)
+{
+    return gRenderer->camera.position;
+}
+
+f32 RendererGetCameraNear(void)
+{
+    return gRenderer->camera.near;
+}
+
+f32 RendererGetCameraFar(void)
+{
+    return gRenderer->camera.far;
 }
