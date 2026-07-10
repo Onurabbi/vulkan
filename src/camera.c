@@ -15,7 +15,7 @@ void UpdateCameraVectors(camera_t *camera)
     front.X = cosf(HMM_AngleDeg(camera->yaw)) * cosf(HMM_AngleDeg(camera->pitch));
     front.Y = sinf(HMM_AngleDeg(camera->pitch));
     front.Z = sinf(HMM_AngleDeg(camera->yaw)) * cosf(HMM_AngleDeg(camera->pitch));
-    front = HMM_Norm(front);
+    camera->front = HMM_Norm(front);
     camera->right = HMM_Norm(HMM_Cross(camera->front, camera->worldUp));
     camera->up    = HMM_Norm(HMM_Cross(camera->right, camera->front));
 }
@@ -39,10 +39,10 @@ void CameraInit(camera_t *camera, vec3_t position, vec3_t up, f32 aspect)
 
 const mat4_t CameraGetViewMatrix(const camera_t *camera)
 {
-    return HMM_LookAt_LH(camera->position, HMM_Add(camera->position, camera->front), camera->up);
+    return HMM_LookAt_RH(camera->position, HMM_Add(camera->position, camera->front), camera->up);
 }
 
 const mat4_t CameraGetProjectionMatrix(const camera_t *camera)
 {
-    return HMM_Perspective_LH_ZO(HMM_AngleDeg(camera->zoom), camera->aspect, camera->near, camera->far);
+    return HMM_Perspective_RH_ZO(HMM_AngleDeg(camera->zoom), camera->aspect, camera->near, camera->far);
 }

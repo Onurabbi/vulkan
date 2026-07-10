@@ -20,8 +20,10 @@ VSOutput main(uint vi: SV_VertexID)
     uint vertexIndex = skyboxData.vertexOffset + vi;
 
     float3 pos = float3(vertices[vertexIndex].vx, vertices[vertexIndex].vy, vertices[vertexIndex].vz);
-    output.uvw = pos;
-    //output.uvw.xy *= -1.0;
+    output.uvw.x = pos.x;
+    //because cubemap generator is broken :(
+    output.uvw.y = -pos.z;
+    output.uvw.z = -pos.y;
 
     // Remove translation from view matrix
     float4x4 view = skyboxData.model;

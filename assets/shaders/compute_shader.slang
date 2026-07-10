@@ -29,10 +29,12 @@ void main(uint3 id : SV_DispatchThreadId)
     center = mul(globals.view, float4(center, 1.0f)).xyz;
     radius = radius * meshDraw.scale;
 
+    float cz = -center.z;
+
     bool visible = true;
-    visible = visible && center.z * globals.frustum[1] - abs(center.x) * globals.frustum[0] > -radius;
-    visible = visible && center.z * globals.frustum[3] - abs(center.y) * globals.frustum[2] > -radius;
-    visible = visible && center.z + radius > globals.near && center.z - radius < globals.far;
+    visible = visible && -cz * globals.frustum[1] - abs(center.x) * globals.frustum[0] > -radius;
+    visible = visible && -cz * globals.frustum[3] - abs(center.y) * globals.frustum[2] > -radius;
+    visible = visible && cz + radius > globals.near && cz - radius < globals.far;
 
     if (visible) {
         uint dci = __atomic_add(shaderData.drawCommandCount[0], 1);
