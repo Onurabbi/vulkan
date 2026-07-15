@@ -179,6 +179,11 @@ void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *ar
 VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorType type, VkShaderStageFlags shaderStage, u32 descriptorCount, b8 descriptorIndexing)
 {
     VkDescriptorSetLayout result;
+    if (descriptorIndexing && (descriptorCount == 0)) {
+        LOGE("Descriptor count can't be 0 with descriptor indexing");
+        return VK_NULL_HANDLE;
+    }
+
     //descriptor set layout for indexing.
     VkDescriptorBindingFlags descVariableFlag = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
     VkDescriptorSetLayoutBindingFlagsCreateInfo descBindingFlags = {
@@ -196,8 +201,8 @@ VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorTyp
     VkDescriptorSetLayoutCreateInfo descLayoutTexCI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pNext = descriptorIndexing ? &descBindingFlags : NULL,
-        .bindingCount = 1,
-        .pBindings = &descLayoutBindingTex
+        .bindingCount = descriptorCount > 0 ? 1 : 0,
+        .pBindings = descriptorCount > 0 ? &descLayoutBindingTex : NULL
     };
     VK_CHECK(vkCreateDescriptorSetLayout(device, &descLayoutTexCI, NULL, &result));
     return result;
@@ -215,7 +220,7 @@ void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device)
     DestroyGraphicsPipeline(pipeline, device);
 }
 
-void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *name, u32 pushConstantSize)
+void CreateComputePipeline(pipeline_t *pipeline, const char *name, VkDevice device, u32 pushConstantSize)
 {
     const resource_t *shaderResource = ResourceSystemGetResource(name);
     if (!shaderResource) {
@@ -262,22 +267,18 @@ void CreateComputePipeline(pipeline_t *pipeline, VkDevice device, const char *na
     VK_CHECK(vkCreateComputePipelines(device, NULL, 1, &ci, 0, &pipeline->pipeline));
 }
 
-void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *name, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout)
+void CreateGraphicsPipeline(pipeline_t *pipeline, const char *name, VkDevice device, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout, VkBool32 depthWrite, VkCullModeFlags cullMode)
 {
     const resource_t *shaderResource = ResourceSystemGetResource(name);
     if (!shaderResource) {
         return;
     }
 
-    LV_ASSERT((shaderResource->shader.stage & VK_SHADER_STAGE_VERTEX_BIT) && (shaderResource->shader.stage & VK_SHADER_STAGE_FRAGMENT_BIT));
-
-    VkBool32 depthWriteEnable = true;
-    VkCullModeFlags cullMode = VK_CULL_MODE_BACK_BIT;
-
-    if (SDL_strnstr(name, "skybox", SDL_strnlen(name, MAX_PATH))) {
-        depthWriteEnable = false;
-        cullMode = VK_CULL_MODE_NONE;
+    if (depthWrite == VK_FALSE) {
+        LV_ASSERT(cullMode == VK_CULL_MODE_NONE);
     }
+
+    LV_ASSERT((shaderResource->shader.stage & VK_SHADER_STAGE_VERTEX_BIT) && (shaderResource->shader.stage & VK_SHADER_STAGE_FRAGMENT_BIT));
 
     VkShaderModuleCreateInfo shaderModuleCI = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -286,7 +287,8 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
     };
     VK_CHECK(vkCreateShaderModule(device, &shaderModuleCI, NULL, &pipeline->shaderModule));
 
-    //Pipeline
+    bool usesPushConstant = (pushConstantSize != 0);
+    
     VkPushConstantRange pushConstantRanges[1] = {
         {
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -298,8 +300,8 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
         .pSetLayouts = &setLayout,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = pushConstantRanges
+        .pushConstantRangeCount = usesPushConstant ? 1 : 0,
+        .pPushConstantRanges = usesPushConstant ? pushConstantRanges : NULL
     };
 
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCI, NULL, &pipeline->pipelineLayout));
@@ -342,11 +344,10 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
         .pDynamicStates = dynamicStates
     };
 
-
     VkPipelineDepthStencilStateCreateInfo depthStencilState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = VK_TRUE,
-        .depthWriteEnable = depthWriteEnable,
+        .depthTestEnable = depthWrite,
+        .depthWriteEnable = depthWrite,
         .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
     };
 
@@ -371,7 +372,7 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, VkDevice device, const char *n
     VkPipelineRasterizationStateCreateInfo rasterizationState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .lineWidth = 1.0f,
-        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
         .cullMode = cullMode,
     };
 

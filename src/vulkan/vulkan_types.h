@@ -156,6 +156,7 @@ typedef struct {
     VkSwapchainKHR swapchain;
     image_t swapchainImages[MAX_SWAPCHAIN_IMAGES];
     image_t depthImage;
+    image_t brdfLut;
     u32 swapchainImageCount;
     u32 queueFamily;
     VkQueue queue;
@@ -171,8 +172,10 @@ typedef struct {
     VmaAllocator allocator;
     VkDescriptorSetLayout texLayout;
     VkDescriptorSetLayout skyboxLayout;
+    VkDescriptorSetLayout dummyLayout;
     VkSampler texSampler;
     VkSampler skyboxSampler;
+    VkSampler brdfLutSampler;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
     VkDescriptorSet descriptorSetSkybox;
@@ -186,6 +189,7 @@ typedef struct {
     pipeline_t pipeline;
     pipeline_t skyboxPipeline;
     pipeline_t computePipeline;
+    pipeline_t genBRDFLUTPipeline;
     f32 cameraZ;
     u32 frameIndex;
     u32 drawCount;

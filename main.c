@@ -236,6 +236,10 @@ static b8 CreateWindow(void *data, vulkan_instance_t instance, const char *title
         return false;
     }
 
+    if (!SDL_SetWindowRelativeMouseMode(window->window, true)) {
+        LOGE("Unable to set relative mouse mode. SDL Error: %s", SDL_GetError());
+    }
+
     if (!SDL_Vulkan_CreateSurface(window->window, instance, NULL, &window->surface)) {
         LOGE("Unable to create vulkan surface. SDL_Error: %s", SDL_GetError());
         SDL_DestroyWindow(window->window);
@@ -336,7 +340,7 @@ int main(int argc, char *argv[])
         retCode = -RETCODE_SDL_INIT;
         goto exit;
     }
-    
+
     threadCount = SDL_GetNumLogicalCPUCores() - 1;
     u64 memorySize = GAME_MEMORY_SIZE;
     void *memoryBlock = SDL_malloc(memorySize);
@@ -456,7 +460,7 @@ int main(int argc, char *argv[])
 
             memset(&gameInput, 0, sizeof(gameInput));
             gameInput.keyboardState = SDL_GetKeyboardState(NULL);
-            SDL_GetMouseState(&gameInput.mouseX, &gameInput.mouseY);
+            SDL_GetRelativeMouseState(&gameInput.mouseX, &gameInput.mouseY);
 
             SDL_Event event;
             while (SDL_PollEvent(&event)) {

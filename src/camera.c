@@ -2,7 +2,7 @@
 
 const f32 YAW         = -90.0f;
 const f32 PITCH       = 0.0f;
-const f32 SPEED       = 2.5f;
+const f32 SPEED       = 0.5f;
 const f32 SENSITIVITY = 0.1f;
 const f32 ZOOM        = 45.0f;
 const vec3_t FRONT    = { 0.0f, 0.0f, -1.0f };
@@ -18,6 +18,46 @@ void UpdateCameraVectors(camera_t *camera)
     camera->front = HMM_Norm(front);
     camera->right = HMM_Norm(HMM_Cross(camera->front, camera->worldUp));
     camera->up    = HMM_Norm(HMM_Cross(camera->right, camera->front));
+}
+
+void CameraMove(camera_t *camera, vec3_t cameraMovement, f32 offsetX, f32 offsetY)
+{
+    if (HMM_LenSqrV3(cameraMovement) > EPSILON * EPSILON) {
+        cameraMovement = HMM_Norm(cameraMovement);
+    }
+
+    vec3_t dRight = {0};
+    if (FLOAT_NOT_EQUAL_TO_ZERO(cameraMovement.X)) {
+        dRight = HMM_Mul(camera->right, cameraMovement.X * camera->movementSpeed);
+    }
+
+    vec3_t dFront = {0};
+    if (FLOAT_NOT_EQUAL_TO_ZERO(cameraMovement.Y)) {
+        dFront = HMM_Mul(camera->front, cameraMovement.Y * camera->movementSpeed);
+    }
+
+    vec3_t dUp = {0};
+    if (FLOAT_NOT_EQUAL_TO_ZERO(cameraMovement.Z)) {
+        dUp = HMM_Mul(camera->up, cameraMovement.Z * camera->movementSpeed);
+    }
+
+    camera->position = HMM_Add(camera->position, HMM_Add(dUp, HMM_Add(dFront, dRight)));
+
+    f32 yaw = camera->yaw + offsetX * camera->mouseSensitivity;
+    f32 pitch = camera->pitch + offsetY * camera->mouseSensitivity;
+
+    if (pitch > 89.0f) {
+        pitch = 89.0f;
+    }
+
+    if (pitch < -89.0f) {
+        pitch = -89.0f;
+    }
+    
+    camera->yaw   = yaw;
+    camera->pitch = pitch;
+
+    UpdateCameraVectors(camera);
 }
 
 void CameraInit(camera_t *camera, vec3_t position, vec3_t up, f32 aspect)

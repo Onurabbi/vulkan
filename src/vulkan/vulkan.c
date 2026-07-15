@@ -137,10 +137,13 @@ void VulkanShutdown(void)
 
     DestroyGraphicsPipeline(&gCtx->pipeline, gCtx->device);
     DestroyGraphicsPipeline(&gCtx->skyboxPipeline, gCtx->device);
+    DestroyGraphicsPipeline(&gCtx->genBRDFLUTPipeline, gCtx->device);
     DestroyComputePipeline(&gCtx->computePipeline, gCtx->device);
 
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->texLayout, NULL);
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->skyboxLayout, NULL);
+    vkDestroyDescriptorSetLayout(gCtx->device, gCtx->dummyLayout, NULL);
+
     vkDestroyDescriptorPool(gCtx->device, gCtx->descriptorPool, NULL);
     vkDestroyCommandPool(gCtx->device, gCtx->commandPool, NULL);
 
@@ -171,13 +174,17 @@ void VulkanShutdown(void)
     vkDestroyImageView(gCtx->device, gCtx->depthImage.view, NULL);
     vmaDestroyImage(gCtx->allocator, gCtx->depthImage.image, gCtx->depthImage.allocation);
 
+    vkDestroyImageView(gCtx->device, gCtx->brdfLut.view, NULL);
+    vmaDestroyImage(gCtx->allocator, gCtx->brdfLut.image, gCtx->brdfLut.allocation);
+
     vkDestroySwapchainKHR(gCtx->device, gCtx->swapchain, NULL);
     SDL_Vulkan_DestroySurface(gCtx->instance, gCtx->window.surface, NULL);
     SDL_DestroyWindow(gCtx->window.window);
 
     vkDestroySampler(gCtx->device, gCtx->texSampler, NULL);
     vkDestroySampler(gCtx->device, gCtx->skyboxSampler, NULL);
-    
+    vkDestroySampler(gCtx->device, gCtx->brdfLutSampler, NULL);
+
     vmaDestroyAllocator(gCtx->allocator);
 
     vkDestroyDevice(gCtx->device, NULL);
@@ -337,19 +344,131 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
 
     VK_CHECK(vkCreateDescriptorPool(ctx->device, &descPoolCI, NULL, &ctx->descriptorPool));
 
-    ctx->texLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount, true);
+    ctx->texLayout    = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount, true);
     ctx->skyboxLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1, false);
+    ctx->dummyLayout  = CreateDescriptorSetLayout(ctx->device, 0, 0, 0, false);
 
-    ctx->texSampler = CreateTextureSampler(ctx->device);
-    ctx->skyboxSampler = CreateCubemapSampler(ctx->device);
+    ctx->texSampler     = CreateTextureSampler(ctx->device, 16, 16.0f);
+    ctx->skyboxSampler  = CreateCubemapSampler(ctx->device, 16, 16.0f);
+    ctx->brdfLutSampler = CreateTextureSampler(ctx->device, 1, 1.0f);
 
     VkFormat imageFormat = ctx->swapchainImages[0].format;
     VkFormat depthFormat = ctx->depthImage.format;
-    CreateGraphicsPipeline(&ctx->pipeline, ctx->device, "shader.spv", imageFormat, depthFormat, sizeof(pbr_data_t), ctx->texLayout);
-    CreateGraphicsPipeline(&ctx->skyboxPipeline, ctx->device, "skybox.spv", imageFormat, depthFormat, sizeof(skybox_data_t), ctx->skyboxLayout);
-    CreateComputePipeline(&ctx->computePipeline, ctx->device, "compute_shader.spv", sizeof(pbr_data_t));
+    CreateGraphicsPipeline(&ctx->pipeline, "shader.spv", ctx->device, imageFormat, depthFormat, sizeof(pbr_data_t), ctx->texLayout, VK_TRUE, VK_CULL_MODE_BACK_BIT);
+    CreateGraphicsPipeline(&ctx->skyboxPipeline, "skybox.spv", ctx->device, imageFormat, depthFormat, sizeof(skybox_data_t), ctx->skyboxLayout, VK_FALSE, VK_CULL_MODE_NONE);
+    CreateGraphicsPipeline(&ctx->genBRDFLUTPipeline, "genbrdflut.spv", ctx->device, ctx->brdfLut.format, VK_FORMAT_UNDEFINED, 0, ctx->dummyLayout, VK_FALSE, VK_CULL_MODE_NONE);
+    CreateComputePipeline(&ctx->computePipeline, "compute_shader.spv", ctx->device, sizeof(pbr_data_t));
 
-    // Descriptor indexing for textures
+    // Generate source images for pbr
+    // BRDF LUT
+
+    VkCommandBuffer cb = gCtx->commandBuffers[gCtx->frameIndex];
+    VK_CHECK(vkResetCommandBuffer(cb, 0));
+    
+    VkCommandBufferBeginInfo cbBeginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+
+    VK_CHECK(vkBeginCommandBuffer(cb, &cbBeginInfo));
+
+    // Layout transition for bfrd lut image?
+    VkImageMemoryBarrier2 colorBarrier = ImageBarrier(ctx->brdfLut.image, 
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        0,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+    );
+
+    VkDependencyInfo dependencyInfo = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &colorBarrier,
+        .pNext = NULL
+    };
+    
+    vkCmdPipelineBarrier2(cb, &dependencyInfo);
+
+    VkRenderingAttachmentInfo colorAttachmentInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = gCtx->brdfLut.view,
+        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = {.color = {1.0f, 1.0f, 0.0f, 1.0f}},
+    };
+
+    VkRenderingInfo renderingInfo = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea.extent.width = 512, // TODO: fix this
+        .renderArea.extent.height = 512, // TODO: fix this
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachmentInfo,
+        .pDepthAttachment = VK_NULL_HANDLE
+    };
+
+    vkCmdBeginRendering(cb, &renderingInfo);
+
+    VkViewport vp = {
+        .x        = 0,
+        .y        = 0,
+        .width    = (f32)512,
+        .height   = (f32)512,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+
+    vkCmdSetViewport(cb, 0, 1, &vp);
+
+    VkRect2D scissor = {
+        .offset = { 0, 0},
+        .extent = { 512, 512 }
+    };
+
+    vkCmdSetScissor(cb, 0, 1, &scissor);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx->genBRDFLUTPipeline.pipeline);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+    vkCmdEndRendering(cb);
+
+    // Transition BRDF LUT image layout to shader read-only optimal for use as a lookup table in PBR shader
+    VkImageMemoryBarrier2 lutBarrier = ImageBarrier(ctx->brdfLut.image, 
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+    );
+
+    VkDependencyInfo lutDependencyInfo = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &lutBarrier,
+        .pNext = NULL
+    };
+    
+    vkCmdPipelineBarrier2(cb, &lutDependencyInfo);
+
+    vkEndCommandBuffer(cb);
+
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb
+    };
+    
+    VK_CHECK(vkResetFences(ctx->device, 1, &ctx->fences[ctx->frameIndex]));
+    VK_CHECK(vkQueueSubmit(ctx->queue, 1, &submitInfo, ctx->fences[ctx->frameIndex]));
+    VK_CHECK(vkWaitForFences(ctx->device, 1, &ctx->fences[ctx->frameIndex], VK_TRUE, UINT64_MAX));
+
+    vkQueueWaitIdle(ctx->queue);
+
+    // Finally we can write descriptors
     VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
         .descriptorSetCount = 1,
@@ -367,7 +486,8 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     VK_CHECK(vkAllocateDescriptorSets(ctx->device, &texDescSetAlloc, &ctx->descriptorSetTex));
 
     VkDescriptorImageInfo *textureDescriptors = NULL;
-    ArrayInitWithArena(textureDescriptors, ScratchArena(), texCount);
+    // Allocating extra memory for BRDF Lut, irradiance cube map and pre-filtered environment cube map
+    ArrayInitWithArena(textureDescriptors, ScratchArena(), texCount +  1);
 
     for (u32 i = 0; i < texCount; i++) {
         VkDescriptorImageInfo info = {0};
@@ -376,6 +496,13 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         info.sampler     = ctx->texSampler;
         ArrayPush(textureDescriptors, info);
     }
+
+    VkDescriptorImageInfo info = {
+        .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+        .imageView   = ctx->brdfLut.view,
+        .sampler     = ctx->brdfLutSampler
+    };
+    ArrayPush(textureDescriptors, info);
 
     VkWriteDescriptorSet writeDescSet = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -424,6 +551,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     };
 
     vkUpdateDescriptorSets(ctx->device, 1, &skyboxWriteDescSet, 0, NULL);
+
 }
 
 void VulkanRender(void)
@@ -484,19 +612,11 @@ void VulkanRender(void)
 
     VK_CHECK(vkBeginCommandBuffer(cb, &cbBI));
 
-    StageBarrier(cb, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
-    );
+    StageBarrier(cb, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
 
     vkCmdFillBuffer(cb, gCtx->drawCommandCountBuffer.buffer, 0, sizeof(u32), 0);
 
-    StageBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_2_MEMORY_WRITE_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
-    );
+    StageBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
 
     //color and depth image need barriers for layout transitions
     VkImageMemoryBarrier2 colorBarrier = ImageBarrier(gCtx->swapchainImages[imageIndex].image,
@@ -944,6 +1064,15 @@ void VulkanInit(vulkan_context_t *ctx)
     ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1);
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;
+
+
+    VmaAllocation brdfLutAllocation;
+    const int32_t brdfLutDim = 512;
+    VkFormat brdfLutFormat = VK_FORMAT_R16G16_SFLOAT;
+    ctx->brdfLut.image = CreateImage(ctx->device, ctx->allocator, brdfLutFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, brdfLutDim, brdfLutDim, 1, 1, &brdfLutAllocation);
+    ctx->brdfLut.view  = CreateImageView(ctx->device, ctx->brdfLut.image, brdfLutFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
+    ctx->brdfLut.allocation = brdfLutAllocation;
+    ctx->brdfLut.format = brdfLutFormat;
 
     CreateBuffer(&ctx->scratchBuffer,
         ctx->device,

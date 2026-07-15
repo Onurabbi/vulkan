@@ -29,9 +29,8 @@ typedef struct
     f32    far;
 } camera_t;
 
-void CameraInit(camera_t *camera, vec3_t position, vec3_t up, f32 aspect);
+void   CameraInit(camera_t *camera, vec3_t position, vec3_t up, f32 aspect);
 mat4_t CameraGetViewMatrix(const camera_t *camera);
 mat4_t CameraGetProjectionMatrix(const camera_t *camera);
-
-
+void   CameraMove(camera_t *camera, vec3_t cameraMovement, f32 mouseOffsetX, f32 mouseOffsetY);
 #endif

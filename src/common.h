@@ -62,9 +62,10 @@ typedef union HMM_Quat quat_t;
 #define MAX_NAME 255
 
 #define LEVO_PI 3.14159265358979323846
-
+#define EPSILON 1e-6f
 #define DEG_TO_RAD(x) (0.0174532925 * (x))
 
+#define FLOAT_NOT_EQUAL_TO_ZERO(x) (((x) > EPSILON) || ((x) < EPSILON))
 #define RETURN_FALSE_IF_FALSE(x)          \
 do {                                      \
    if (!(x)) {                            \

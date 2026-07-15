@@ -377,7 +377,7 @@ void DestroyTexture(texture_resource_t *texture, VmaAllocator allocator, VkDevic
     vmaDestroyImage(allocator, texture->image, texture->allocation);
 }
 
-VkSampler CreateTextureSampler(VkDevice device)
+VkSampler CreateTextureSampler(VkDevice device, u32 numLevels, f32 maxAnisotropy)
 {
     VkSampler result = VK_NULL_HANDLE;
     VkSamplerCreateInfo samplerCI = {
@@ -386,15 +386,15 @@ VkSampler CreateTextureSampler(VkDevice device)
         .minFilter = VK_FILTER_LINEAR,
         .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
         .anisotropyEnable = VK_TRUE,
-        .maxAnisotropy = 8.0f, //check this
-        .maxLod = 16.0f,
+        .maxAnisotropy = maxAnisotropy, //check this
+        .maxLod = (f32)numLevels,
     };
 
     VK_CHECK(vkCreateSampler(device, &samplerCI, NULL, &result));
     return result;
 }
 
-VkSampler CreateCubemapSampler(VkDevice device)
+VkSampler CreateCubemapSampler(VkDevice device, u32 numLevels, f32 maxAnisotropy)
 {
     VkSampler result = VK_NULL_HANDLE;
     VkSamplerCreateInfo samplerCI = {
@@ -407,9 +407,9 @@ VkSampler CreateCubemapSampler(VkDevice device)
         .mipLodBias = 0.0f,
         .compareOp = VK_COMPARE_OP_NEVER,
         .minLod = 0.0f,
-        .maxLod = 16.0f, 
+        .maxLod = (f32)numLevels, 
         .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
-        .maxAnisotropy = 8.0f,
+        .maxAnisotropy = maxAnisotropy,
     };
     VK_CHECK(vkCreateSampler(device, &samplerCI, NULL, &result));
     return result;
