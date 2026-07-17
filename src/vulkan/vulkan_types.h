@@ -125,11 +125,13 @@ typedef struct {
 typedef struct {
     mat4_t projection;
     mat4_t model;
+    mat4_t view;
     VkDeviceAddress vertexAddress;
     u32 vertexOffset;
     // required by cpu code, but not by shader code. I still put it here for convenience
     u32 indexOffset;
     u32 indexCount; //this is always 36 for a cube
+    u32 textureIndex;
 } skybox_data_t;
 
 typedef struct {
@@ -157,6 +159,8 @@ typedef struct {
     image_t swapchainImages[MAX_SWAPCHAIN_IMAGES];
     image_t depthImage;
     image_t brdfLut;
+    image_t diffuseIrradiance;
+    image_t prefilteredEnv;
     u32 swapchainImageCount;
     u32 queueFamily;
     VkQueue queue;
@@ -171,14 +175,11 @@ typedef struct {
     buffer_t scratchBuffer;
     VmaAllocator allocator;
     VkDescriptorSetLayout texLayout;
-    VkDescriptorSetLayout skyboxLayout;
     VkDescriptorSetLayout dummyLayout;
     VkSampler texSampler;
-    VkSampler skyboxSampler;
     VkSampler brdfLutSampler;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
-    VkDescriptorSet descriptorSetSkybox;
     VkFence fences[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore presentSemaphores[MAX_FRAMES_IN_FLIGHT];//max frames in flight
     VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES]; //swapchain image count
@@ -190,6 +191,8 @@ typedef struct {
     pipeline_t skyboxPipeline;
     pipeline_t computePipeline;
     pipeline_t genBRDFLUTPipeline;
+    pipeline_t diffuseIrradianceMapPipeline;
+    pipeline_t prefilteredEnvMapPipeline;
     f32 cameraZ;
     u32 frameIndex;
     u32 drawCount;

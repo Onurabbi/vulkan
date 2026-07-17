@@ -81,8 +81,12 @@ struct PBRData {
 struct SkyboxData {
     float4x4 projection;
     float4x4 model;
+    float4x4 view;
     Vertex *vertices;
     // we need to know this because we are using a storage buffer for vertices
     uint vertexOffset;
     // index offset and index count are set by the draw call
+    uint indexOffset;
+    uint indexCount;
+    uint textureIndex;
 };

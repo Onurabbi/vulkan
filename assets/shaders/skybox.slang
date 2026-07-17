@@ -9,7 +9,7 @@ struct VSOutput
     float3 uvw;
 };
 
-SamplerCube skyboxTexture;
+SamplerCube textures[];
 
 [shader("vertex")]
 VSOutput main(uint vi: SV_VertexID)
@@ -38,6 +38,7 @@ VSOutput main(uint vi: SV_VertexID)
 [shader("fragment")]
 float4 main(VSOutput input)
 {
-    return fromsrgb(skyboxTexture.Sample(input.uvw));
+    uint textureIndex = skyboxData.textureIndex;
+    return fromsrgb(textures[NonUniformResourceIndex(textureIndex)].Sample(input.uvw));
 }
 

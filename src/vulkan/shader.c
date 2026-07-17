@@ -185,7 +185,7 @@ VkDescriptorSetLayout CreateDescriptorSetLayout(VkDevice device, VkDescriptorTyp
     }
 
     //descriptor set layout for indexing.
-    VkDescriptorBindingFlags descVariableFlag = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+    VkDescriptorBindingFlags descVariableFlag = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
     VkDescriptorSetLayoutBindingFlagsCreateInfo descBindingFlags = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
         .bindingCount = 1,

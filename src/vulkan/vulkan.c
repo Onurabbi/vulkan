@@ -141,7 +141,6 @@ void VulkanShutdown(void)
     DestroyComputePipeline(&gCtx->computePipeline, gCtx->device);
 
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->texLayout, NULL);
-    vkDestroyDescriptorSetLayout(gCtx->device, gCtx->skyboxLayout, NULL);
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->dummyLayout, NULL);
 
     vkDestroyDescriptorPool(gCtx->device, gCtx->descriptorPool, NULL);
@@ -177,12 +176,14 @@ void VulkanShutdown(void)
     vkDestroyImageView(gCtx->device, gCtx->brdfLut.view, NULL);
     vmaDestroyImage(gCtx->allocator, gCtx->brdfLut.image, gCtx->brdfLut.allocation);
 
+    vkDestroyImageView(gCtx->device, gCtx->diffuseIrradiance.view, NULL);
+    vmaDestroyImage(gCtx->allocator, gCtx->diffuseIrradiance.image, gCtx->diffuseIrradiance.allocation);
+
     vkDestroySwapchainKHR(gCtx->device, gCtx->swapchain, NULL);
     SDL_Vulkan_DestroySurface(gCtx->instance, gCtx->window.surface, NULL);
     SDL_DestroyWindow(gCtx->window.window);
 
     vkDestroySampler(gCtx->device, gCtx->texSampler, NULL);
-    vkDestroySampler(gCtx->device, gCtx->skyboxSampler, NULL);
     vkDestroySampler(gCtx->device, gCtx->brdfLutSampler, NULL);
 
     vmaDestroyAllocator(gCtx->allocator);
@@ -318,47 +319,53 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         u32 vertexOffset = geometry.meshes[meshIndex].vertexOffset;
         u32 indexOffset  = geometry.meshes[meshIndex].meshLods[0].indexOffset;
         u32 indexCount   = geometry.meshes[meshIndex].meshLods[0].indexCount;
+
+        uint32_t skyboxTextureIndex = 0;
+        resource_t *skyboxTexture = ResourceSystemGetResource("cubemap_aarfontein.dds");
+        if (skyboxTexture) {
+            skyboxTextureIndex = skyboxTexture->texture.textureIndex;
+        }
+
         LV_ASSERT(indexCount == 36);
+        
         for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             ctx->skyboxData[i].vertexOffset  = vertexOffset;
             ctx->skyboxData[i].indexOffset   = indexOffset;
             ctx->skyboxData[i].indexCount    = indexCount;
-            ctx->skyboxData[i].vertexAddress = ctx->vertexBuffer.deviceAddress; 
+            ctx->skyboxData[i].vertexAddress = ctx->vertexBuffer.deviceAddress;
+            ctx->skyboxData[i].textureIndex  = skyboxTextureIndex;
         }
     }
 
     const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena());
-    u32 texCount = ArrayCount(textureResources);
+    u32 texCount = ArrayCount(textureResources) + 1; // plus 1 for genbrdflut
 
-    VkDescriptorPoolSize poolSizes[2] = { 
+    VkDescriptorPoolSize poolSizes[1] = { 
         { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,.descriptorCount = texCount }, 
-        { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1 }
     };
 
     VkDescriptorPoolCreateInfo descPoolCI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = 2,
-        .poolSizeCount = 2,
+        .maxSets = 1,
+        .poolSizeCount = 1,
         .pPoolSizes = poolSizes
     };
 
     VK_CHECK(vkCreateDescriptorPool(ctx->device, &descPoolCI, NULL, &ctx->descriptorPool));
 
     ctx->texLayout    = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount, true);
-    ctx->skyboxLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1, false);
     ctx->dummyLayout  = CreateDescriptorSetLayout(ctx->device, 0, 0, 0, false);
 
     ctx->texSampler     = CreateTextureSampler(ctx->device, 16, 16.0f);
-    ctx->skyboxSampler  = CreateCubemapSampler(ctx->device, 16, 16.0f);
     ctx->brdfLutSampler = CreateTextureSampler(ctx->device, 1, 1.0f);
 
     VkFormat imageFormat = ctx->swapchainImages[0].format;
     VkFormat depthFormat = ctx->depthImage.format;
     CreateGraphicsPipeline(&ctx->pipeline, "shader.spv", ctx->device, imageFormat, depthFormat, sizeof(pbr_data_t), ctx->texLayout, VK_TRUE, VK_CULL_MODE_BACK_BIT);
-    CreateGraphicsPipeline(&ctx->skyboxPipeline, "skybox.spv", ctx->device, imageFormat, depthFormat, sizeof(skybox_data_t), ctx->skyboxLayout, VK_FALSE, VK_CULL_MODE_NONE);
+    CreateGraphicsPipeline(&ctx->skyboxPipeline, "skybox.spv", ctx->device, imageFormat, depthFormat, sizeof(skybox_data_t), ctx->texLayout, VK_FALSE, VK_CULL_MODE_NONE);
     CreateGraphicsPipeline(&ctx->genBRDFLUTPipeline, "genbrdflut.spv", ctx->device, ctx->brdfLut.format, VK_FORMAT_UNDEFINED, 0, ctx->dummyLayout, VK_FALSE, VK_CULL_MODE_NONE);
     CreateComputePipeline(&ctx->computePipeline, "compute_shader.spv", ctx->device, sizeof(pbr_data_t));
-
+    
     // Generate source images for pbr
     // BRDF LUT
 
@@ -487,9 +494,9 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
 
     VkDescriptorImageInfo *textureDescriptors = NULL;
     // Allocating extra memory for BRDF Lut, irradiance cube map and pre-filtered environment cube map
-    ArrayInitWithArena(textureDescriptors, ScratchArena(), texCount +  1);
+    ArrayInitWithArena(textureDescriptors, ScratchArena(), texCount);
 
-    for (u32 i = 0; i < texCount; i++) {
+    for (u32 i = 0; i < texCount - 1; i++) {
         VkDescriptorImageInfo info = {0};
         info.imageLayout = textureResources[i]->texture.layout;
         info.imageView   = textureResources[i]->texture.view;
@@ -509,49 +516,12 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         .dstSet = ctx->descriptorSetTex,
         .dstBinding = 0,
         .dstArrayElement = 0,
-        .descriptorCount = texCount,
+        .descriptorCount = ArrayCount(textureDescriptors),
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .pImageInfo = textureDescriptors,
     };
 
     vkUpdateDescriptorSets(ctx->device, 1, &writeDescSet, 0, NULL);
-
-    // Descriptor for skybox shader
-    resource_t *skyboxTextureResource = ResourceSystemGetResource("cubemap_aarfontein.dds");
-    if (!skyboxTextureResource) {
-        LOGE("Unable to find skybox texture resource");
-        return;
-    }
-
-    VkDescriptorSetAllocateInfo skyboxDescAllocInfo = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .pNext = NULL,
-        .descriptorPool = ctx->descriptorPool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &ctx->skyboxLayout
-    };
-
-    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &skyboxDescAllocInfo, &ctx->descriptorSetSkybox));
-    
-    VkDescriptorImageInfo skyboxImageInfo = {
-        .imageLayout = skyboxTextureResource->texture.layout,
-        .imageView   = skyboxTextureResource->texture.view,
-        .sampler     = ctx->skyboxSampler
-    };
-
-    VkWriteDescriptorSet skyboxWriteDescSet = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext = NULL,
-        .dstSet = ctx->descriptorSetSkybox,
-        .dstBinding = 0,
-        .dstArrayElement = 0,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &skyboxImageInfo
-    };
-
-    vkUpdateDescriptorSets(ctx->device, 1, &skyboxWriteDescSet, 0, NULL);
-
 }
 
 void VulkanRender(void)
@@ -709,7 +679,7 @@ void VulkanRender(void)
     vkCmdSetScissor(cb, 0, 1, &scissor);
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->skyboxPipeline.pipeline);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->skyboxPipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetSkybox, 0, NULL);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, gCtx->skyboxPipeline.pipelineLayout, 0, 1, &gCtx->descriptorSetTex, 0, NULL);
     vkCmdBindIndexBuffer(cb, gCtx->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(cb, gCtx->skyboxPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(skybox_data_t), &gCtx->skyboxData[gCtx->frameIndex]);
     vkCmdDrawIndexed(cb, gCtx->skyboxData[gCtx->frameIndex].indexCount, 1, gCtx->skyboxData[gCtx->frameIndex].indexOffset, gCtx->skyboxData[gCtx->frameIndex].vertexOffset, 0);
@@ -1060,27 +1030,33 @@ void VulkanInit(vulkan_context_t *ctx)
     LV_ASSERT(depthFormat != VK_FORMAT_UNDEFINED);
 
     VmaAllocation depthAllocation;
-    ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, ctx->window.w, ctx->window.h, 1, 1, &depthAllocation);
+    ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
+        ctx->window.w, ctx->window.h, 1, 1, &depthAllocation);
     ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1);
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;
 
-
     VmaAllocation brdfLutAllocation;
     const int32_t brdfLutDim = 512;
     VkFormat brdfLutFormat = VK_FORMAT_R16G16_SFLOAT;
-    ctx->brdfLut.image = CreateImage(ctx->device, ctx->allocator, brdfLutFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, brdfLutDim, brdfLutDim, 1, 1, &brdfLutAllocation);
+    ctx->brdfLut.image = CreateImage(ctx->device, ctx->allocator, brdfLutFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
+        brdfLutDim, brdfLutDim, 1, 1, &brdfLutAllocation);
     ctx->brdfLut.view  = CreateImageView(ctx->device, ctx->brdfLut.image, brdfLutFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
     ctx->brdfLut.allocation = brdfLutAllocation;
     ctx->brdfLut.format = brdfLutFormat;
 
-    CreateBuffer(&ctx->scratchBuffer,
-        ctx->device,
-        128 * 1024 * 1024,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VMA_MEMORY_USAGE_AUTO,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        ctx->allocator);
+    VmaAllocation diffuseIrradianceAllocation;
+    const int32_t diffuseIrradianceDim = 64;
+    const uint32_t mipCountDiffuseIrradiance = (uint32_t)(floor(log2(64))) + 1;
+    VkFormat diffuseIrradianceFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
+    ctx->diffuseIrradiance.image = CreateImage(ctx->device, ctx->allocator, diffuseIrradianceFormat, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 
+        diffuseIrradianceDim, diffuseIrradianceDim, mipCountDiffuseIrradiance, 6, &diffuseIrradianceAllocation);
+    ctx->diffuseIrradiance.view = CreateImageView(ctx->device, ctx->diffuseIrradiance.image, diffuseIrradianceFormat, VK_IMAGE_ASPECT_COLOR_BIT, 
+        mipCountDiffuseIrradiance, 6);
+    ctx->diffuseIrradiance.allocation = diffuseIrradianceAllocation;
+    
+    CreateBuffer(&ctx->scratchBuffer, ctx->device, 128 * 1024 * 1024, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, ctx->allocator);
 
     VkSemaphoreCreateInfo semaphoreCI = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
