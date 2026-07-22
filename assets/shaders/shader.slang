@@ -1,7 +1,7 @@
 #include "mesh.glsl"
 #include "math.glsl"
 
-Sampler2D textures[];
+[[vk::binding(0, 0)]] Sampler2D textures[];
 
 [[vk::push_constant]] PBRData pbrData;
 
@@ -150,11 +150,8 @@ float4 main(VSOutput input) {
     lo += (kD * albedo.rgb / PI + specular) * radiance * ndotl;
 
     float3 ambient = float3(0.03) * albedo.rgb * ao;
+
     float3 color = ambient + lo;
 
-    // HDR tonemapping
-    color = color / (color + float3(1.0));
-    // Gamma correct
-    color = pow(color, float3(1.0 / 2.2));
     return float4(color, 1.0);
 }

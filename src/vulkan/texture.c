@@ -55,6 +55,8 @@ const u32 DDS_DIMENSION_TEXTURE2D = 3;
 
 typedef enum
 {
+    DXGI_FORMAT_R32G32B32A32_FLOAT = 2,
+    DXGI_FORMAT_R16G16B16A16_FLOAT = 10,
 	DXGI_FORMAT_BC1_UNORM = 71,
 	DXGI_FORMAT_BC1_UNORM_SRGB = 72,
 	DXGI_FORMAT_BC2_UNORM = 74,
@@ -93,6 +95,10 @@ static VkFormat getFormat(const DDS_HEADER *header, const DDS_HEADER_DXT10 *head
 	{
 		switch (header10->dxgiFormat)
 		{
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+            return VK_FORMAT_R32G32B32A32_SFLOAT;
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+            return VK_FORMAT_R16G16B16A16_SFLOAT;
         case DXGI_FORMAT_BC1_UNORM:
             return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
         case DXGI_FORMAT_BC1_UNORM_SRGB:
@@ -127,34 +133,47 @@ static VkFormat getFormat(const DDS_HEADER *header, const DDS_HEADER_DXT10 *head
 	return VK_FORMAT_UNDEFINED;
 }
 
-static size_t getImageSizeBC(u32 width, u32 height, u32 levels, u32 blockSize)
+static size_t GetImagePitch(u32 width, u32 height, VkFormat format, u32 level)
 {
-	size_t result = 0;
+    width >>= level;
+    height >>= level;
 
-    for (u32 j = 0; j < levels; ++j)
-    {
-        result += ((width + 3) / 4) * ((height + 3) / 4) * blockSize;
-
-        width = width > 1 ? width / 2 : 1;
-        height = height > 1 ? height / 2 : 1;
-    }
-
-	return result;
+    switch (format) {
+        case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
+        case VK_FORMAT_BC4_SNORM_BLOCK:
+        case VK_FORMAT_BC4_UNORM_BLOCK:
+        case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
+            return ((width  + 3) / 4) * ((height + 3) / 4) * 8;
+        case VK_FORMAT_BC2_UNORM_BLOCK:
+        case VK_FORMAT_BC2_SRGB_BLOCK:
+        case VK_FORMAT_BC3_UNORM_BLOCK:
+        case VK_FORMAT_BC3_SRGB_BLOCK:
+        case VK_FORMAT_BC5_UNORM_BLOCK:
+        case VK_FORMAT_BC5_SNORM_BLOCK:
+        case VK_FORMAT_BC6H_UFLOAT_BLOCK:
+        case VK_FORMAT_BC6H_SFLOAT_BLOCK:
+        case VK_FORMAT_BC7_UNORM_BLOCK:
+        case VK_FORMAT_BC7_SRGB_BLOCK:
+            return ((width + 3) / 4) * ((height + 3) / 4) * 16;
+        case VK_FORMAT_R32G32B32A32_SFLOAT:
+            return width * height * 16;
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+            return width * height * 8;
+        default:
+            return 0;
+	}
 }
 
-static size_t getImageSizeRGBA(u32 width, u32 height, u32 levels)
+static size_t GetImageSize(u32 width, u32 height, u32 levels, u32 layers, VkFormat format)
 {
 	size_t result = 0;
 
 	for (u32 i = 0; i < levels; ++i)
 	{
-		result += (size_t)width * (size_t)height * 4;
-
-		width = width > 1 ? width / 2 : 1;
-		height = height > 1 ? height / 2 : 1;
+		result += GetImagePitch(width, height, format, i);
 	}
 
-	return result;
+	return result * layers;
 }
 
 b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, VkSampler sampler, const char *path, u32 layerCount)
@@ -201,14 +220,15 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 	    goto exit;
 	}
 
-	VkFormat format = getFormat(&header, &header10);
+    VkFormat format = getFormat(&header, &header10);
 	if (format == VK_FORMAT_UNDEFINED) {
 	    LV_ASSERT(false);
 	    goto exit;
 	}
 
-	u32 blockSize = (format == VK_FORMAT_BC1_RGBA_UNORM_BLOCK || format == VK_FORMAT_BC4_SNORM_BLOCK || format == VK_FORMAT_BC4_UNORM_BLOCK) ? 8 : 16;
-	size_t imageSize = getImageSizeBC(header.dwWidth, header.dwHeight, header.dwMipMapCount, blockSize);
+    u32 mipLevels = header.dwMipMapCount ? header.dwMipMapCount : 1;
+
+    size_t imageSize = GetImageSize(header.dwWidth, header.dwHeight, mipLevels, layerCount, format);
 
 	if (scratch->size < imageSize) {
 	    LV_ASSERT(false);
@@ -216,7 +236,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 	}
 
 	texture->image = CreateImage(device, allocator, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        header.dwWidth / layerCount, header.dwHeight, header.dwMipMapCount, layerCount, &texture->allocation);
+        header.dwWidth, header.dwHeight, mipLevels, layerCount, &texture->allocation);
 
 	size_t readSize = fread(scratch->allocInfo.pMappedData, 1, imageSize, file);
 	if (readSize != imageSize) {
@@ -229,7 +249,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 	    goto exit;
 	}
 
-    texture->view = CreateImageView(device, texture->image, format, VK_IMAGE_ASPECT_COLOR_BIT, header.dwMipMapCount, layerCount);
+    texture->view = CreateImageView(device, texture->image, format, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels, layerCount);
     VkFenceCreateInfo fenceOneTimeCI = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     };
@@ -262,7 +282,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
         .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         .image = texture->image,
         .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .subresourceRange.levelCount = header.dwMipMapCount,
+        .subresourceRange.levelCount = mipLevels,
         .subresourceRange.layerCount = layerCount,
     };
 
@@ -274,58 +294,50 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 
     vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
 
-    size_t levelStartOffset = 0;
-    u32 curMipWidth = header.dwWidth;
-    u32 curMipHeight = header.dwHeight;
-
     // Allocate enough space for all copy regions (e.g. up to 13 mips * 6 faces = 78 regions)
     VkBufferImageCopy copyRegions[256];
     u32 regionIndex = 0;
 
-    for (u32 level = 0; level < header.dwMipMapCount; level++) {
-        u32 faceWidth = curMipWidth / layerCount;
-        if (faceWidth == 0) {
-            faceWidth = 1;
-        }
-        u32 faceHeight = curMipHeight;
+    // DDS stores cubemap data face-first. Each face contains all of its mip
+    // levels before the data for the next face begins.
+    size_t faceSize = GetImageSize(header.dwWidth, header.dwHeight, mipLevels, 1, format);
+    size_t mipStartOffset = 0;
 
-        // Size in blocks for a single face's width
-        size_t faceBlockWidth = (faceWidth + 3) / 4;
+    for (u32 level = 0; level < mipLevels; level++) {
+        size_t pitch = GetImagePitch(header.dwWidth, header.dwHeight, format, level);
+
+        u32 mipWidth = header.dwWidth >> level;
+        u32 mipHeight = header.dwHeight >> level;
+
+        if (mipWidth == 0) mipWidth = 1;
+        if (mipHeight == 0) mipHeight = 1;
 
         for (u32 layer = 0; layer < layerCount; layer++) {
-            VkBufferImageCopy bufferCopyRegion = {0}; 
-            
-            // Calculate starting offset for this specific face column in the current level
-            bufferCopyRegion.bufferOffset = levelStartOffset + (layer * faceBlockWidth * blockSize);
-            
-            bufferCopyRegion.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-            bufferCopyRegion.imageSubresource.mipLevel       = level;
-            bufferCopyRegion.imageSubresource.baseArrayLayer = layer;
-            bufferCopyRegion.imageSubresource.layerCount     = 1;
-            
-            bufferCopyRegion.imageExtent.width  = faceWidth;
-            bufferCopyRegion.imageExtent.height = faceHeight;
-            bufferCopyRegion.imageExtent.depth  = 1;
-            
-            // bufferRowLength is the total row width in texels in the buffer
-            bufferCopyRegion.bufferRowLength    = curMipWidth;
-            bufferCopyRegion.bufferImageHeight  = curMipHeight;
-            
-            copyRegions[regionIndex++] = bufferCopyRegion;
+            VkBufferImageCopy region = {0};
+
+            region.bufferOffset = layer * faceSize + mipStartOffset;
+
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = level;
+            region.imageSubresource.baseArrayLayer = layer;
+            region.imageSubresource.layerCount = 1;
+
+            region.imageExtent.width = mipWidth;
+            region.imageExtent.height = mipHeight;
+            region.imageExtent.depth = 1;
+
+            region.bufferRowLength = 0;
+            region.bufferImageHeight = 0;
+
+            copyRegions[regionIndex++] = region;
         }
 
-        // Advance the level start offset by the total size of the current level's strip
-        levelStartOffset += ((curMipWidth + 3) / 4) * ((curMipHeight + 3) / 4) * blockSize;
-
-        // Scale down dimensions for the next mip level
-        curMipWidth  = curMipWidth > 1 ? curMipWidth / 2 : 1;
-        curMipHeight = curMipHeight > 1 ? curMipHeight / 2 : 1;
+        mipStartOffset += pitch;
     }
-
-    u32 copyCount = header.dwMipMapCount * layerCount;
+    u32 copyCount = mipLevels * layerCount;
     vkCmdCopyBufferToImage(cbOneTime, scratch->buffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copyCount, copyRegions);
 
-    LV_ASSERT(levelStartOffset == imageSize);
+    LV_ASSERT(faceSize * layerCount == imageSize);
 
     VkImageMemoryBarrier2 barrierTexRead = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -334,10 +346,10 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
         .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .image = texture->image,
         .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .subresourceRange.levelCount = header.dwMipMapCount,
+        .subresourceRange.levelCount = mipLevels,
         .subresourceRange.layerCount = layerCount,
     };
 
@@ -401,13 +413,15 @@ VkSampler CreateCubemapSampler(VkDevice device, u32 numLevels, f32 maxAnisotropy
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .magFilter = VK_FILTER_LINEAR,
         .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .anisotropyEnable = VK_TRUE,
         .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .mipLodBias = 0.0f,
         .compareOp = VK_COMPARE_OP_NEVER,
         .minLod = 0.0f,
-        .maxLod = (f32)numLevels, 
+        .maxLod = numLevels > 0 ? (f32)(numLevels - 1) : 0.0f,
         .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
         .maxAnisotropy = maxAnisotropy,
     };

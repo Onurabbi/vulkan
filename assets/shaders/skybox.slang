@@ -6,7 +6,7 @@
 struct VSOutput
 {
     float4 position : SV_Position;
-    float3 uvw;
+    float3 uvw : TEXCOORD0;
 };
 
 SamplerCube textures[];
@@ -22,8 +22,8 @@ VSOutput main(uint vi: SV_VertexID)
     float3 pos = float3(vertices[vertexIndex].vx, vertices[vertexIndex].vy, vertices[vertexIndex].vz);
     output.uvw.x = pos.x;
     //because cubemap generator is broken :(
-    output.uvw.y = -pos.z;
-    output.uvw.z = -pos.y;
+    output.uvw.y = -pos.y;
+    output.uvw.z = pos.z;
 
     // Remove translation from view matrix
     float4x4 view = skyboxData.model;
@@ -38,7 +38,8 @@ VSOutput main(uint vi: SV_VertexID)
 [shader("fragment")]
 float4 main(VSOutput input)
 {
-    uint textureIndex = skyboxData.textureIndex;
-    return fromsrgb(textures[NonUniformResourceIndex(textureIndex)].Sample(input.uvw));
+    float3 sampled = textures[NonUniformResourceIndex(skyboxData.textureIndex)].SampleLevel(input.uvw, 0.0).rgb;
+    // Use a lower exposure multiplier for the skybox so it doesn't blow out to white
+    return float4(ACESFitted(sampled), 1.0);
 }
 

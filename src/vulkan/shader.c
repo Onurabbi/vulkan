@@ -79,7 +79,6 @@ void ParseShader(resource_t *shaderResource, const u8 *spirv, memory_arena_t *ar
     int localSizeIdZ = -1;
 
     const u32 *insn = &code[5];
-
     while (insn != &code[codeSize]) {
         u16 opCode = (u16)(insn[0]);
         u16 wordCount = (u16)(insn[0] >> 16);

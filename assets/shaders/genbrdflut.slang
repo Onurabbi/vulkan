@@ -1,4 +1,8 @@
 
+#include "math.glsl"
+
+static const uint NUM_SAMPLES = 1024u;
+
 struct VSOutput
 {
     float4 position : SV_Position;
@@ -13,9 +17,6 @@ VSOutput main(uint vi: SV_VertexID)
     output.position = float4(output.uv * 2.0f - 1.0f, 0.0f, 1.0f);
     return output;
 }
-
-static const uint NUM_SAMPLES = 1024u;
-static const float PI = 3.1415926536;
 
 // Based omn http://byteblacksmith.com/improvements-to-the-canonical-one-liner-glsl-rand-for-opengl-es-2-0/
 float random(float2 co)

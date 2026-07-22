@@ -159,7 +159,7 @@ typedef struct {
     image_t swapchainImages[MAX_SWAPCHAIN_IMAGES];
     image_t depthImage;
     image_t brdfLut;
-    image_t diffuseIrradiance;
+    image_t diffuseIrradianceMap;
     image_t prefilteredEnv;
     u32 swapchainImageCount;
     u32 queueFamily;
@@ -177,7 +177,7 @@ typedef struct {
     VkDescriptorSetLayout texLayout;
     VkDescriptorSetLayout dummyLayout;
     VkSampler texSampler;
-    VkSampler brdfLutSampler;
+    VkSampler cubemapSampler;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
     VkFence fences[MAX_FRAMES_IN_FLIGHT];

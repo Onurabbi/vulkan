@@ -10,4 +10,5 @@ VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkI
 VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  VkImageUsageFlags usage, u32 width, u32 height, u32 mipLevels, u32 layerCount, VmaAllocation *allocation);
 VkSampler CreateTextureSampler(VkDevice device, u32 numLevels, f32 maxAnisotropy);
 VkSampler CreateCubemapSampler(VkDevice device, u32 numLevels, f32 maxAnisotropy);
+
 #endif
