@@ -26,7 +26,8 @@ endif()
 set(ASSET_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets")
 set(ASSET_OUTPUT_DIR "${PROJECT_BINARY_DIR}/../assets")
 
-file(GLOB_RECURSE SLANG_SOURCE_FILES "${ASSET_SOURCE_DIR}/shaders/*.slang")
+file(GLOB SLANG_SOURCE_FILES "${ASSET_SOURCE_DIR}/shaders/*.slang")
+file(GLOB SLANG_INCLUDE_FILES "${ASSET_SOURCE_DIR}/shaders/includes/*")
 
 set(SPIRV_BINARY_FILES "")
 foreach(SLANG_FILE ${SLANG_SOURCE_FILES})
@@ -37,7 +38,7 @@ foreach(SLANG_FILE ${SLANG_SOURCE_FILES})
 
     add_custom_command(
         OUTPUT ${SPIRV_FILE_ABS}
-        DEPENDS ${SLANG_FILE} "${ASSET_SOURCE_DIR}/shaders/mesh.glsl" "${ASSET_SOURCE_DIR}/shaders/math.glsl"
+        DEPENDS ${SLANG_FILE} ${SLANG_INCLUDE_FILES}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_DIR}"
         COMMAND ${SLANGC} ${SLANG_FILE} -target spirv -fvk-use-scalar-layout -o ${SPIRV_FILE_ABS}
         COMMENT "Compiling ${SLANG_FILE} to ${SPIRV_FILE_ABS}")

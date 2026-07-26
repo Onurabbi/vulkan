@@ -1,3 +1,5 @@
+#pragma once
+
 #define INVALID_TEXTURE 0xFFFFFFFF
 
 struct Vertex {
@@ -89,4 +91,5 @@ struct SkyboxData {
     uint indexOffset;
     uint indexCount;
     uint textureIndex;
+    float roughness;
 };

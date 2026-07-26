@@ -132,6 +132,7 @@ typedef struct {
     u32 indexOffset;
     u32 indexCount; //this is always 36 for a cube
     u32 textureIndex;
+    float roughness; // only required for prefiltered environment map
 } skybox_data_t;
 
 typedef struct {

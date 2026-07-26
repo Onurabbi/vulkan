@@ -1,5 +1,5 @@
-#include "mesh.glsl"
-#include "math.glsl"
+#include "includes/mesh.slang"
+#include "includes/math.slang"
 
 [[vk::binding(0, 0)]] Sampler2D textures[];
 
