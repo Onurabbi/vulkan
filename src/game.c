@@ -66,9 +66,9 @@ LV_EXPORT void Update(game_memory_t *gameMemory, game_input_t *gameInput)
     }
     
     if (gameInput->keyboardState[SDL_SCANCODE_Q]) {
-        cameraMovement.Z = 1.0f;
-    } else if (gameInput->keyboardState[SDL_SCANCODE_E]) {
         cameraMovement.Z = -1.0f;
+    } else if (gameInput->keyboardState[SDL_SCANCODE_E]) {
+        cameraMovement.Z = 1.0f;
     }
 
     CameraMove(&gameState->renderer.camera, cameraMovement, gameInput->mouseX, gameInput->mouseY);

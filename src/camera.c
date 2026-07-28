@@ -44,7 +44,7 @@ void CameraMove(camera_t *camera, vec3_t cameraMovement, f32 offsetX, f32 offset
     camera->position = HMM_Add(camera->position, HMM_Add(dUp, HMM_Add(dFront, dRight)));
 
     f32 yaw = camera->yaw + offsetX * camera->mouseSensitivity;
-    f32 pitch = camera->pitch + offsetY * camera->mouseSensitivity;
+    f32 pitch = camera->pitch - offsetY * camera->mouseSensitivity;
 
     if (pitch > 89.0f) {
         pitch = 89.0f;
@@ -84,5 +84,7 @@ const mat4_t CameraGetViewMatrix(const camera_t *camera)
 
 const mat4_t CameraGetProjectionMatrix(const camera_t *camera)
 {
-    return HMM_Perspective_RH_ZO(HMM_AngleDeg(camera->zoom), camera->aspect, camera->near, camera->far);
+    mat4_t result = HMM_Perspective_RH_ZO(HMM_AngleDeg(camera->zoom), camera->aspect, camera->near, camera->far);
+    result.Elements[1][1] *= -1;
+    return result;
 }
