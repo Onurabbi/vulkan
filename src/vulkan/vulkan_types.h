@@ -36,6 +36,7 @@ typedef struct {
     VkImageView view;
     VkFormat format;
     VmaAllocation allocation;
+    u32 index;
 } image_t;
 
 typedef struct {
@@ -120,6 +121,9 @@ typedef struct {
     u32 selected;
     u32 drawCount;
     f32 lodTarget;
+    u32 brdflutIndex;
+    u32 diffuseIrradianceIndex;
+    u32 prefilteredEnvIndex;
 } globals_t;
 
 typedef struct {

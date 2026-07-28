@@ -43,6 +43,9 @@ struct Globals {
     uint selected;
     uint drawCount;
     float lodTarget;
+    uint brdflutIndex;
+    uint diffuseIrradianceIndex;
+    uint prefilteredEnvIndex;
 };
 
 struct DrawCommand {

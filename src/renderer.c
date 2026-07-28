@@ -8,7 +8,7 @@ static renderer_t *gRenderer;
 
 void RendererInit(renderer_t *renderer)
 {
-    CameraInit(&renderer->camera, (vec3_t){ 0.0f, 0.0f, 10.0f }, (vec3_t){ 0.0f, 1.0f, 0.0f }, ASPECT_RATIO);
+    CameraInit(&renderer->camera, (vec3_t){ 0.0f, 0.0f, -10.0f }, (vec3_t){ 0.0f, 1.0f, 0.0f }, ASPECT_RATIO);
     renderer->type = GetRendererType();
     switch (renderer->type) {
         case RENDERER_TYPE_VULKAN:

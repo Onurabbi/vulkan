@@ -381,9 +381,12 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
             }
 
             skyboxData->model = faceMatrices[face];
-            skyboxData->projection = HMM_Perspective_RH_ZO(HMM_PI / 2.0f, 1.0f, 1.0f, 512.0f);
+            // near must stay well inside the cube: its faces are at distance 1.0, so a
+            // near of 1.0 puts the captured face exactly on the near plane and clips it
+            skyboxData->projection = HMM_Perspective_RH_ZO(HMM_PI / 2.0f, 1.0f, 0.1f, 512.0f);
             skyboxData->view = view;
-
+            skyboxData->roughness = (float)level / (float)(mipCount - 1);
+            
             vkCmdPushConstants(cb, pipeline->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(skybox_data_t), skyboxData);
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
@@ -667,7 +670,7 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         u32 indexCount   = geometry.meshes[meshIndex].meshLods[0].indexCount;
 
         uint32_t skyboxTextureIndex = 0;
-        resource_t *skyboxTexture = ResourceSystemGetResource("cubemap_valley_of_desolation.dds");
+        resource_t *skyboxTexture = ResourceSystemGetResource("cubemap_cobblestone_parish_road.dds");
         if (skyboxTexture) {
             skyboxTextureIndex = skyboxTexture->texture.textureIndex;
         }
@@ -759,11 +762,16 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     // Generate source images for pbr
     VkCommandBuffer cb = ctx->commandBuffers[ctx->frameIndex];
     GenerateBRDFLUT(&ctx->brdfLut, ctx->device, cb, &ctx->genBRDFLUTPipeline, ctx->queue, ctx->fences[ctx->frameIndex], ctx->allocator);
+    ctx->brdfLut.index = ArrayCount(textureDescriptors);
+
     GenerateIBLCubemap(&ctx->diffuseIrradianceMap, 64, VK_FORMAT_R32G32B32A32_SFLOAT, &ctx->skyboxData[ctx->frameIndex], ctx->indexBuffer.buffer, ctx->device, cb,
         &ctx->diffuseIrradianceMapPipeline, ctx->descriptorSetTex, ctx->queue, ctx->fences[ctx->frameIndex], ctx->allocator);
+    ctx->diffuseIrradianceMap.index = ArrayCount(textureDescriptors) + 1;
+
     GenerateIBLCubemap(&ctx->prefilteredEnv, 512, VK_FORMAT_R16G16B16A16_SFLOAT, &ctx->skyboxData[ctx->frameIndex], ctx->indexBuffer.buffer, ctx->device, cb,
         &ctx->prefilteredEnvMapPipeline, ctx->descriptorSetTex, ctx->queue, ctx->fences[ctx->frameIndex], ctx->allocator);
-    
+    ctx->prefilteredEnv.index = ArrayCount(textureDescriptors) + 2;
+
     // We can finally push the generated images
     VkDescriptorImageInfo brdflutInfo = {
         .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
@@ -832,6 +840,9 @@ void VulkanRender(void)
     globals.camPos = RendererGetCameraPosition();
     globals.lightDir = (vec3_t){1.0f, 1.0f, 1.0f};
     globals.lightDir = HMM_Norm(globals.lightDir);
+    globals.brdflutIndex = gCtx->brdfLut.index;
+    globals.diffuseIrradianceIndex = gCtx->diffuseIrradianceMap.index;
+    globals.prefilteredEnvIndex = gCtx->prefilteredEnv.index;
 
     UploadBuffer(&gCtx->shaderGlobalsBuffers[gCtx->frameIndex], &globals, sizeof(globals_t), 0);
 

@@ -47,7 +47,8 @@ float2 BRDF(float ndotv, float roughness)
 [shader("fragment")]
 float4 main(VSOutput input) : SV_Target
 {
+    // v maps straight to roughness -- the shader samples this LUT at (NdotV, roughness)
     float ndotv = max(input.uv.x, 0.001);
-    float roughness = max(1.0 - input.uv.y, 0.001);
-    return float4(BRDF(input.uv.x, 1.0 - input.uv.y), 0.0, 1.0);
+    float roughness = max(input.uv.y, 0.001);
+    return float4(BRDF(ndotv, roughness), 0.0, 1.0);
 }

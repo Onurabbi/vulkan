@@ -1,11 +1,11 @@
 #include "camera.h"
 
-const f32 YAW         = -90.0f;
+const f32 YAW         = 90.0f;
 const f32 PITCH       = 0.0f;
 const f32 SPEED       = 0.5f;
 const f32 SENSITIVITY = 0.1f;
 const f32 ZOOM        = 45.0f;
-const vec3_t FRONT    = { 0.0f, 0.0f, -1.0f };
+const vec3_t FRONT    = { 0.0f, 0.0f, 1.0f };
 const f32 NEAR        = 0.1f;
 const f32 FAR         = 256.0f;
 

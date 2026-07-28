@@ -43,10 +43,18 @@ float3 ImportanceSample_GGX(float2 Xi, float roughness, float3 normal)
     return normalize(tangentX * H.x + tangentY * H.y + normal * H.z);
 }
 
+// a perfect mirror (roughness 0) makes the ggx terms collapse to 0/0 -- the
+// visibility term at grazing angles, the lobe at ndoth == 1. clamp perceptual
+// roughness the way filament does; 0.045 is the smallest value that stays
+// finite in fp32
+static const float MIN_PERCEPTUAL_ROUGHNESS = 0.045;
+
 // Geometric shadowing function
 float G_SchlickSmith_GGX(float dotnl, float dotnv, float roughness)
 {
-    float k = (roughness * roughness) / 2.0f;
+    float a = max(roughness, MIN_PERCEPTUAL_ROUGHNESS);
+    // k stays > 0 after the clamp, so dotnl/dotnv of 0 give 0 instead of 0/0
+    float k = (a * a) / 2.0f;
     float gl = dotnl / (dotnl * (1.0 - k) + k);
     float gv = dotnv / (dotnv * (1.0 - k) + k);
     return gl * gv;
@@ -55,8 +63,31 @@ float G_SchlickSmith_GGX(float dotnl, float dotnv, float roughness)
 // Normal Distribution function
 float D_GGX(float dotNH, float roughness)
 {
-	float alpha = roughness * roughness;
+	float alpha = max(roughness, MIN_PERCEPTUAL_ROUGHNESS);
+	alpha = alpha * alpha;
 	float alpha2 = alpha * alpha;
 	float denom = dotNH * dotNH * (alpha2 - 1.0) + 1.0;
-	return (alpha2)/(PI * denom*denom); 
+	return alpha2 / max(PI * denom * denom, 1e-7);
+}
+
+float TrowbridgeReitz(float ndoth, float roughness)
+{
+    float a = max(roughness, MIN_PERCEPTUAL_ROUGHNESS);
+    a = a * a;
+    float a2 = a * a;
+    float ndoth2 = ndoth * ndoth;
+    float nom = a2;
+    float denom = (ndoth2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+    return nom / max(denom, 1e-7);
+}
+
+float3 FresnelSchlickRoughness(float cosTheta, float3 f0, float roughness)
+{
+    return f0 + (max(float3(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+float3 FresnelSchlick(float cosTheta, float3 f0)
+{
+    return f0 + (1.0f - f0) * pow(1.0f - cosTheta, 5.0f);
 }

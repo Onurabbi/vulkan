@@ -26,7 +26,7 @@ float3 PrefilterEnvMap(float3 R, float roughness)
             float omegaP = 4.0 * PI / (6.0 * width * width);
             //Biased (+1.0) mip level for better result
             float mipLevel = roughness == 0 ? 0.0 : max(0.5 * log2(omegaS / omegaP) + 1.0, 0.0);
-            color += textures[skyboxData.textureIndex].SampleLevel(L, mipLevel).rgb + dotNL;
+            color += textures[skyboxData.textureIndex].SampleLevel(L, mipLevel).rgb * dotNL;
             totalWeight += dotNL;
         }
     }

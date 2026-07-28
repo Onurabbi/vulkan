@@ -500,6 +500,7 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
         }
     }
 
+    // TODO: add debugging texture (pink or something at index 0)
     for (u32 i = 0; i < data->materials_count; i++) {
         cgltf_material *material = &data->materials[i];
 
@@ -538,7 +539,7 @@ static void LoadScene(resource_t *sceneResource, memory_arena_t *scratchArena, m
         mat.emissiveFactor[2] = material->emissive_factor[2];
 
         if (material->occlusion_texture.texture) {
-            mat.ao = GetTextureIndexFromTextureView(&material->emissive_texture);
+            mat.ao = GetTextureIndexFromTextureView(&material->occlusion_texture);
         }
         mat.aoStrength = material->occlusion_texture.scale;
 
