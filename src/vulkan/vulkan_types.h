@@ -140,22 +140,24 @@ typedef struct {
 } skybox_data_t;
 
 typedef struct {
-    f32 scale; // used to scale the spectrum [1.0 - 5.0]
-    f32 spreadBlend; // used to blend between agitated water motion and wind direction [0.0 1.0]
-    f32 swell; // Influences wave choppiness [0.0 1.0]
-    f32 gamma; // defines spectrum peak [0.0 7.0]
-    f32 shortWavesFade; // [0.0 1.0]
-    f32 windDirection; // [0.0 360.0]
-    f32 fetch; // distance over which wind impacts wave formation [0.0 10000.0]
-    f32 windSpeed; // [0.0 100.0]
+    f32 scale;
     f32 angle;
+    f32 spreadBlend;
+    f32 swell;
     f32 alpha;
     f32 peakOmega;
+    f32 gamma;
+    f32 shortWavesFade;
 }jonswap_data_t;
 
 typedef struct {
-    VkDeviceAddress jonswap;
-    u32 seed;
+    VkDeviceAddress jonswapData;
+    float depth;
+    u32   seed;
+    u32   lengthScale[4];
+    u32   textureIndices[4];
+    float lowCutoff;
+    float highCutoff;
 } initial_ocean_spectrum_data_t;
 
 typedef struct {
@@ -230,6 +232,8 @@ typedef struct {
     buffer_t drawCommandBuffers[MAX_FRAMES_IN_FLIGHT];
     buffer_t drawCommandCountBuffer;
     buffer_t scratchBuffer;
+    buffer_t jonswapBuffer;
+    
     VmaAllocator allocator;
     VkDescriptorSetLayout texLayout;
     VkDescriptorSetLayout storageImageLayout;
@@ -247,12 +251,16 @@ typedef struct {
     VkCommandBuffer commandBuffers[MAX_FRAMES_IN_FLIGHT];//max frames in flight
     pbr_data_t pbrData[MAX_FRAMES_IN_FLIGHT];
     skybox_data_t skyboxData[MAX_FRAMES_IN_FLIGHT];
+    initial_ocean_spectrum_data_t spectrumData[MAX_FRAMES_IN_FLIGHT];
+    
     pipeline_t pipeline;
     pipeline_t skyboxPipeline;
     pipeline_t computePipeline;
     pipeline_t genBRDFLUTPipeline;
     pipeline_t diffuseIrradianceMapPipeline;
     pipeline_t prefilteredEnvMapPipeline;
+    pipeline_t initialOceanSpectrumPipeline;
+
     f32 cameraZ;
     u32 frameIndex;
     u32 drawCount;

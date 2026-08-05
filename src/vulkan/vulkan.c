@@ -23,6 +23,8 @@
 
 static vulkan_context_t *gCtx;
 
+#define gravity 9.81f
+
 static inline VkCommandBuffer CommandBuffer(vulkan_context_t *ctx)
 {
     return ctx->commandBuffers[ctx->frameIndex];
@@ -31,6 +33,28 @@ static inline VkCommandBuffer CommandBuffer(vulkan_context_t *ctx)
 static inline VkFence Fence(vulkan_context_t *ctx)
 {
     return ctx->fences[ctx->frameIndex];
+}
+
+static inline f32 JonswapAlpha(f32 fetch, f32 windSpeed)
+{
+    return 0.076f * powf(gravity * fetch / windSpeed / windSpeed, -0.22f);
+}
+
+static inline f32 JonswapPeakFrequency(f32 fetch, f32 windSpeed)
+{
+    return 22 * powf(windSpeed * fetch / gravity / gravity, -0.33f);
+}
+
+static void FillSpectrumParameters(jonswap_data_t *jonswap, f32 scale, f32 windSpeed, f32 windDirection, f32 fetch, f32 spreadBlend, f32 swell, f32 peakEnhancement, f32 shortWavesFade)
+{
+    jonswap->scale = scale;
+    jonswap->angle = windDirection * HMM_PI / 180.0f;
+    jonswap->spreadBlend = spreadBlend;
+    jonswap->swell = HMM_Clamp(0.01f, swell, 1.0f);
+    jonswap->alpha = JonswapAlpha(fetch, windSpeed);
+    jonswap->peakOmega = JonswapPeakFrequency(fetch, windSpeed);
+    jonswap->gamma = peakEnhancement;
+    jonswap->shortWavesFade = shortWavesFade;
 }
 
 // Multisampled color target the scene is rendered into. Its contents are resolved into
@@ -239,6 +263,7 @@ void VulkanShutdown(void)
     DestroyGraphicsPipeline(&gCtx->diffuseIrradianceMapPipeline, gCtx->device);
     DestroyGraphicsPipeline(&gCtx->prefilteredEnvMapPipeline, gCtx->device);
     DestroyComputePipeline(&gCtx->computePipeline, gCtx->device);
+    DestroyComputePipeline(&gCtx->initialOceanSpectrumPipeline, gCtx->device);
 
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->texLayout, NULL);
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->dummyLayout, NULL);
@@ -260,7 +285,8 @@ void VulkanShutdown(void)
     DestroyBuffer(&gCtx->drawBuffer, gCtx->allocator);
     DestroyBuffer(&gCtx->meshBuffer, gCtx->allocator);
     DestroyBuffer(&gCtx->materialBuffer, gCtx->allocator);
-    
+    DestroyBuffer(&gCtx->jonswapBuffer, gCtx->allocator);
+
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroyFence(gCtx->device, gCtx->fences[i], NULL);
         vkDestroySemaphore(gCtx->device, gCtx->presentSemaphores[i], NULL);
@@ -889,6 +915,33 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, ctx->allocator);
     UploadBuffer(&ctx->materialBuffer, geometry.materials, sizeof(material_t) * materialCount, 0);
 
+    CreateBuffer(&ctx->jonswapBuffer, ctx->device, sizeof(jonswap_data_t) * 8, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, ctx->allocator);
+
+    // 2 for each cascade
+    jonswap_data_t jonswapParameters[8];
+    FillSpectrumParameters(&jonswapParameters[0], 0.1, 2, 22, 100000, 0.642, 1, 1, 0.025);
+    FillSpectrumParameters(&jonswapParameters[1], 0.07, 2, 59, 1000, 0, 1, 1, 0.01);
+    FillSpectrumParameters(&jonswapParameters[2], 0.25, 20, 97, 100000000, 0.14, 1, 1, 0.5);
+    FillSpectrumParameters(&jonswapParameters[3], 0.25, 20, 67, 1000000, 0.47, 1, 1, 0.5);
+    FillSpectrumParameters(&jonswapParameters[4], 0.15, 5, 105, 1000000, 0.2, 1, 1, 0.5);
+    FillSpectrumParameters(&jonswapParameters[5], 0.1, 1, 19, 10000, 0.298, 0.695, 1, 0.5);
+    FillSpectrumParameters(&jonswapParameters[6], 1, 1, 209, 200000, 0.56, 1, 1, 0.0001);
+    FillSpectrumParameters(&jonswapParameters[7], 0.23, 1, 0, 1000, 0, 0, 1, 0.0001);
+    
+    UploadBuffer(&ctx->jonswapBuffer, jonswapParameters, sizeof(jonswapParameters), 0);
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        ctx->spectrumData[i].jonswapData = ctx->jonswapBuffer.deviceAddress;
+        ctx->spectrumData[i].seed = 1234;
+        ctx->spectrumData[i].lowCutoff = 0.0001f;
+        ctx->spectrumData[i].highCutoff = 9000.0f;
+        ctx->spectrumData[i].depth = 20.0f;
+        ctx->spectrumData[i].lengthScale[0] = 94;
+        ctx->spectrumData[i].lengthScale[1] = 128;
+        ctx->spectrumData[i].lengthScale[2] = 64;
+        ctx->spectrumData[i].lengthScale[3] = 32;
+    }
+
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         ctx->pbrData[i].globalsAddress = ctx->shaderGlobalsBuffers[i].deviceAddress;
         ctx->pbrData[i].drawDataAddress = ctx->drawBuffer.deviceAddress;
@@ -1017,7 +1070,8 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     CreateGraphicsPipeline(&ctx->prefilteredEnvMapPipeline, "prefiltered_env_map.spv", ctx->device, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_UNDEFINED, sizeof(skybox_data_t), setLayouts, 2, VK_FALSE, VK_CULL_MODE_NONE, VK_SAMPLE_COUNT_1_BIT);
     
     CreateComputePipeline(&ctx->computePipeline, "compute_shader.spv", ctx->device, NULL, 0, sizeof(pbr_data_t));
-    
+    CreateComputePipeline(&ctx->initialOceanSpectrumPipeline, "initial_spectrum.spv", ctx->device, &ctx->storageImageLayout, 1, sizeof(initial_ocean_spectrum_data_t));
+
     ctx->brdfLutPath = ResourceSystemMakeFullPath("brdfLut.img", RESOURCE_TYPE_IMAGE);
     ctx->diffuseIrradianceMapPath = ResourceSystemMakeFullPath("diffuseIrradianceMap.img", RESOURCE_TYPE_IMAGE);
     ctx->prefilteredEnvMapPath = ResourceSystemMakeFullPath("prefilteredEnvMap.img", RESOURCE_TYPE_IMAGE);
@@ -1030,14 +1084,52 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
     ctx->diffuseIrradianceMap = LoadGeneratedTexture(ctx, "diffuseIrradianceMap.img");
     ctx->prefilteredEnvMap = LoadGeneratedTexture(ctx, "prefilteredEnvMap.img");
 
-    // Storage images need to be created first?
+    // Storage images need to be created first
     ctx->initialOceanSpectrum0 = LoadGeneratedTexture(ctx, "initialOceanSpectrum0.simg");
     ctx->initialOceanSpectrum1 = LoadGeneratedTexture(ctx, "initialOceanSpectrum1.simg");
     ctx->initialOceanSpectrum2 = LoadGeneratedTexture(ctx, "initialOceanSpectrum2.simg");
     ctx->initialOceanSpectrum3 = LoadGeneratedTexture(ctx, "initialOceanSpectrum3.simg");
 
-    //their layouts need to be transitioned
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        ctx->spectrumData[i].textureIndices[0] = ctx->initialOceanSpectrum0->storageIndex;
+        ctx->spectrumData[i].textureIndices[1] = ctx->initialOceanSpectrum1->storageIndex;
+        ctx->spectrumData[i].textureIndices[2] = ctx->initialOceanSpectrum2->storageIndex;
+        ctx->spectrumData[i].textureIndices[3] = ctx->initialOceanSpectrum3->storageIndex;
+    }
 
+    VkCommandBuffer cb = CommandBuffer(ctx);
+    vkResetCommandBuffer(cb, 0);
+
+    VkCommandBufferBeginInfo cbBeginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+
+    VK_CHECK(vkBeginCommandBuffer(cb, &cbBeginInfo));
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, gCtx->initialOceanSpectrumPipeline.pipeline);
+    vkCmdPushConstants(cb, ctx->initialOceanSpectrumPipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ctx->spectrumData[0]), &ctx->spectrumData[ctx->frameIndex]);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, ctx->initialOceanSpectrumPipeline.pipelineLayout, 0, 1, &ctx->descriptorSetStorageImage, 0, NULL);
+    // initial_spectrum.slang is [numthreads(8,8,1)] over the full 1024x1024 texture
+    u32 numWorkgroups = 1024 / 8;
+    vkCmdDispatch(cb, numWorkgroups, numWorkgroups, 1);
+
+    StageBarrier(cb,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        VK_ACCESS_2_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        VK_ACCESS_2_SHADER_READ_BIT);
+    
+    vkEndCommandBuffer(cb);
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb
+    };
+    
+    VkFence fence = Fence(ctx);
+    VK_CHECK(vkResetFences(ctx->device, 1, &fence));
+    VK_CHECK(vkQueueSubmit(ctx->queue, 1, &submitInfo, fence));
+    VK_CHECK(vkWaitForFences(ctx->device, 1, &fence, VK_TRUE, UINT64_MAX));
 }
 
 void VulkanRender(void)

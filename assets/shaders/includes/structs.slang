@@ -72,21 +72,18 @@ struct Material {
 };
 
 struct JonswapData {
-    float scale; // used to scale the spectrum [1.0 - 5.0]
-    float spreadBlend; // used to blend between agitated water motion and wind direction [0.0 1.0]
-    float swell; // Influences wave choppiness [0.0 1.0]
-    float gamma; // defines spectrum peak [0.0 7.0]
-    float shortWavesFade; // [0.0 1.0]
-    float windDirection; // [0.0 360.0]
-    float fetch; // distance over which wind impacts wave formation [0.0 10000.0]
-    float windSpeed; // [0.0 100.0]
+    float scale;
     float angle;
+    float spreadBlend;
+    float swell;
     float alpha;
     float peakOmega;
+    float gamma;
+    float shortWavesFade;  
 };
 
 struct InitialOceanSpectrumData {
-    JonswapData *jonswap;
+    JonswapData *jonswapData;
     float        depth;
     uint         seed;
     uint         lengthScale[4];

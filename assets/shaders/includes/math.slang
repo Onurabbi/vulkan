@@ -28,7 +28,7 @@ float4 fromsrgb(float4 c)
 float hash(uint n) {
     // integer hash copied from Hugo Elias
     n = (n << 13U) ^ n;
-    n = n * (n * n * 15731U + 0x789221U) + 0x1376312589U;
+    n = n * (n * n * 15731U + 0x789221U) + 0x13763125U;
     return float(n & uint(0x7fffffffU)) / float(0x7fffffff);
 }
 
