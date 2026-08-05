@@ -42,6 +42,10 @@ static const char *GetSubDirFromType(resource_type_t type)
         dir = "meshes/";
     } else if (type == RESOURCE_TYPE_TEXTURE) {
         dir = "textures/";
+    } else if (type == RESOURCE_TYPE_IMAGE) {
+        dir = "images/";
+    } else if (type == RESOURCE_TYPE_STORAGE_IMAGE) {
+        dir = "images/";
     } else {
         LOGF("Unknown resource type");
         return NULL;
@@ -53,6 +57,11 @@ static const char *GetFullPathFromUri(const char *uri, resource_type_t type, mem
 {
     const char *dir = GetSubDirFromType(type);
     return StringIntern(ArenaPrintf(arena, "%s%s%s", gResourceSystem->assetDir, dir, uri));
+}
+
+const char *ResourceSystemMakeFullPath(const char *uri, resource_type_t type)
+{
+    return GetFullPathFromUri(uri, type, ScratchArena());
 }
 
 static void LoadTexture(resource_t *textureResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
@@ -69,6 +78,29 @@ static void LoadTexture(resource_t *textureResource, memory_arena_t *scratchAren
 
     textureResource->texture.textureIndex = gResourceSystem->textureCount - 1;
     VulkanLoadTexture(textureResource, textureResource->path, layerCount);
+}
+
+static void LoadImage(resource_t *imageResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+{
+    (void)scratchArena;
+    (void)permanentArena;
+
+    imageResource->type = RESOURCE_TYPE_IMAGE;
+    imageResource->texture.textureIndex = gResourceSystem->textureCount - 1;
+    
+    VulkanGenerateTexture(imageResource);
+}
+
+static void LoadStorageImage(resource_t *imageResource, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
+{
+    (void)scratchArena;
+    (void)permanentArena;
+
+    imageResource->type = RESOURCE_TYPE_IMAGE;
+    imageResource->texture.textureIndex = gResourceSystem->textureCount - 1;
+    imageResource->texture.storageIndex = gResourceSystem->storageImageCount - 1;
+
+    VulkanGenerateStorageImage(imageResource);
 }
 
 static void AppendMesh(vertex_t *vertices, u32 *indices, memory_arena_t *scratchArena, memory_arena_t *permanentArena)
@@ -709,11 +741,15 @@ static resource_type_t GetResourceType(const char *fName)
         return RESOURCE_TYPE_TEXTURE;
     } else if (strncmp(extension, "gltf", 4) == 0) {
         return RESOURCE_TYPE_MESH;
+    } else if (strncmp(extension, "img", 3) == 0) {
+        return RESOURCE_TYPE_IMAGE;
+    } else if (strncmp(extension, "simg", 4) == 0) {
+        return RESOURCE_TYPE_STORAGE_IMAGE;
     }
     return RESOURCE_TYPE_INVALID;
 }
 
-static void ResourceSystemLoadResource(resource_t *resources, const char *uri, resource_type_t type)
+static resource_t *LoadResource(resource_t *resources, const char *uri, resource_type_t type)
 {
     resource_t resource = {0};
     resource.type = type;
@@ -734,6 +770,15 @@ static void ResourceSystemLoadResource(resource_t *resources, const char *uri, r
             gResourceSystem->textureCount++;
             LoadFn = LoadTexture;
             break;
+        case RESOURCE_TYPE_IMAGE:
+            gResourceSystem->textureCount++;
+            LoadFn = LoadImage;
+            break;
+        case RESOURCE_TYPE_STORAGE_IMAGE:
+            gResourceSystem->textureCount++;
+            gResourceSystem->storageImageCount++;
+            LoadFn = LoadStorageImage;
+            break;
         default:
             LV_ASSERT(false);
             break;
@@ -750,6 +795,7 @@ static void ResourceSystemLoadResource(resource_t *resources, const char *uri, r
     } else {
         LOGW("Resource at %s already loaded!", resource.path);
     }
+    return (resource_t *)data;
 }
 
 static void LoadResources(resource_t *resources, const char *assetDir, resource_type_t type, memory_arena_t *arena)
@@ -772,7 +818,7 @@ static void LoadResources(resource_t *resources, const char *assetDir, resource_
     for (u32 i = 0; i < count; i++) {
         //skip directories
         if (GetResourceType(glob[i]) == type) {
-            ResourceSystemLoadResource(resources, glob[i], type);
+            (void)LoadResource(resources, glob[i], type);
         }
     }
     SDL_free(glob);
@@ -786,6 +832,7 @@ void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity)
 
     const char *basePath = SDL_GetBasePath();
     gResourceSystem->assetDir = StringIntern(ArenaPrintf(ScratchArena(), "%s%s", basePath, "assets/"));
+
     ArrayInitWithArena(gResourceSystem->resources, PermanentArena(), resourceCapacity);
 
     // these could all be allocated on scratch arena?
@@ -811,6 +858,7 @@ void ResourceSystemShutdown(void)
             case RESOURCE_TYPE_SHADER:
                 break;
             case RESOURCE_TYPE_TEXTURE:
+            case RESOURCE_TYPE_IMAGE:
                 VulkanUnloadTexture(resource);
                 break;
             default:
@@ -836,6 +884,11 @@ resource_t *ResourceSystemGetResource(const char *uri)
         LOGE("Unable to find resource %s", fullPath);
     }
     return (resource_t*)data;
+}
+
+resource_t *ResourceSystemLoadResource(const char *uri)
+{
+    return LoadResource(gResourceSystem->resources, uri, GetResourceType(uri));
 }
 
 const resource_t **ResourceSystemGetTextures(memory_arena_t *arena)

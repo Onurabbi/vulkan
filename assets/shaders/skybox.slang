@@ -1,4 +1,4 @@
-#include "includes/mesh.slang"
+#include "includes/structs.slang"
 #include "includes/math.slang"
 #include "includes/tonemapping.slang"
 

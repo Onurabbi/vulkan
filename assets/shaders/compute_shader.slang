@@ -1,4 +1,4 @@
-#include "includes/mesh.slang"
+#include "includes/structs.slang"
 #include "includes/math.slang"
 
 [[vk::push_constant]] PBRData shaderData;

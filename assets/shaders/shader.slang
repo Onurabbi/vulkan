@@ -1,4 +1,4 @@
-#include "includes/mesh.slang"
+#include "includes/structs.slang"
 #include "includes/math.slang"
 #include "includes/pbr_helpers.slang"
 #include "includes/tonemapping.slang"
@@ -74,7 +74,7 @@ float4 main(VSOutput input) {
     Material material = pbrData.materials[drawData.materialIndex];
     Globals *globals = pbrData.globals;
 
-    float3 lightColor = float3(3.0, 5.0, 8.0);
+    float3 lightColor = float3(1.0, 1.0, 1.0);
 
     float4 albedo = material.diffuseFactor;
     albedo *= fromsrgb(textures[NonUniformResourceIndex(material.albedo)].Sample(input.uv));

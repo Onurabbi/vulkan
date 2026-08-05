@@ -219,7 +219,7 @@ void DestroyComputePipeline(pipeline_t *pipeline, VkDevice device)
     DestroyGraphicsPipeline(pipeline, device);
 }
 
-void CreateComputePipeline(pipeline_t *pipeline, const char *name, VkDevice device, u32 pushConstantSize)
+void CreateComputePipeline(pipeline_t *pipeline, const char *name, VkDevice device, VkDescriptorSetLayout *setLayouts, u32 setLayoutCount, u32 pushConstantSize)
 {
     const resource_t *shaderResource = ResourceSystemGetResource(name);
     if (!shaderResource) {
@@ -242,8 +242,8 @@ void CreateComputePipeline(pipeline_t *pipeline, const char *name, VkDevice devi
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 0,
-        .pSetLayouts = NULL,
+        .setLayoutCount = setLayoutCount,
+        .pSetLayouts = setLayouts,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange
     };
@@ -266,7 +266,7 @@ void CreateComputePipeline(pipeline_t *pipeline, const char *name, VkDevice devi
     VK_CHECK(vkCreateComputePipelines(device, NULL, 1, &ci, 0, &pipeline->pipeline));
 }
 
-void CreateGraphicsPipeline(pipeline_t *pipeline, const char *name, VkDevice device, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout setLayout, VkBool32 depthWrite, VkCullModeFlags cullMode)
+void CreateGraphicsPipeline(pipeline_t *pipeline, const char *name, VkDevice device, VkFormat colorFormat, VkFormat depthFormat, u32 pushConstantSize, VkDescriptorSetLayout *setLayouts, u32 setLayoutCount, VkBool32 depthWrite, VkCullModeFlags cullMode, VkSampleCountFlagBits samples)
 {
     const resource_t *shaderResource = ResourceSystemGetResource(name);
     if (!shaderResource) {
@@ -297,8 +297,8 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, const char *name, VkDevice dev
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 1,
-        .pSetLayouts = &setLayout,
+        .setLayoutCount = setLayoutCount,
+        .pSetLayouts = setLayouts,
         .pushConstantRangeCount = usesPushConstant ? 1 : 0,
         .pPushConstantRanges = usesPushConstant ? pushConstantRanges : NULL
     };
@@ -375,9 +375,11 @@ void CreateGraphicsPipeline(pipeline_t *pipeline, const char *name, VkDevice dev
         .cullMode = cullMode,
     };
 
+    // Must match the sample count of the attachments this pipeline renders into.
+    // With dynamic rendering this is the only place the sample count is declared.
     VkPipelineMultisampleStateCreateInfo multisampleState = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+        .rasterizationSamples = samples
     };
 
     VkGraphicsPipelineCreateInfo pipelineCI = {

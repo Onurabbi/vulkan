@@ -23,13 +23,15 @@ typedef struct {
     b8 usesPushConstants;
 } shader_resource_t;
 
-typedef struct {
+typedef struct texture_resource_t {
     VmaAllocation allocation;
     VkImage image;
     VkImageView view;
     VkImageLayout layout;
+    VkFormat format;
     u32 layerCount;
-    u32 textureIndex;
+    u32 textureIndex; //slot in descriptorSetTex (set 0, binding 0)
+    u32 storageIndex; //slot in descriptorsetStorageImage (set 1, binding 0)
 } texture_resource_t;
 
 typedef enum {
@@ -37,6 +39,8 @@ typedef enum {
     RESOURCE_TYPE_MESH = 1,
     RESOURCE_TYPE_SHADER = 2,
     RESOURCE_TYPE_TEXTURE = 3,
+    RESOURCE_TYPE_IMAGE = 4,
+    RESOURCE_TYPE_STORAGE_IMAGE = 5,
 }resource_type_t;
 
 typedef struct {
@@ -68,16 +72,16 @@ typedef struct {
     u32 materialCount;
     u32 shaderCount;
     u32 textureCount;
-
-    // TODO: how to fix this??
-    
+    u32 storageImageCount;
 } resource_system_t;
 
 void ResourceSystemInit(resource_system_t *resourceSystem, u32 resourceCapacity);
 void ResourceSystemShutdown(void);
 void ResourceSystemHotReload(resource_system_t *resourceSystem);
 
+resource_t *ResourceSystemLoadResource(const char *uri);
 resource_t *ResourceSystemGetResource(const char *fileName);
 const resource_t **ResourceSystemGetTextures(memory_arena_t *arena);
 const geometry_t ResourceSystemGetGeometry(void);
+const char *ResourceSystemMakeFullPath(const char *uri, resource_type_t type);
 #endif

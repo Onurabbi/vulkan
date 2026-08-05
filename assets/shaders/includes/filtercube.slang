@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mesh.slang"
+#include "structs.slang"
 
 struct VSOutput
 {
@@ -24,7 +24,7 @@ VSOutput main(uint vi: SV_VertexID)
     // must match the swizzle in skybox.slang, otherwise the baked IBL maps
     // end up in a different frame than the environment the skybox shows
     output.uvw.x = pos.x;
-    output.uvw.y = -pos.y;
+    output.uvw.y = pos.y;
     output.uvw.z = pos.z;
 
     output.position = mul(skyboxData.projection, mul(skyboxData.view, mul(skyboxData.model, float4(pos, 1.0))));

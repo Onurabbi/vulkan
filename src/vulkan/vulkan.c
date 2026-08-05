@@ -23,6 +23,101 @@
 
 static vulkan_context_t *gCtx;
 
+static inline VkCommandBuffer CommandBuffer(vulkan_context_t *ctx)
+{
+    return ctx->commandBuffers[ctx->frameIndex];
+}
+
+static inline VkFence Fence(vulkan_context_t *ctx)
+{
+    return ctx->fences[ctx->frameIndex];
+}
+
+// Multisampled color target the scene is rendered into. Its contents are resolved into
+// the swapchain image at the end of the render, so they never need to be stored.
+static void CreateMSAAColorImage(vulkan_context_t *ctx)
+{
+    VmaAllocation allocation;
+    ctx->msaaColorImage.image = CreateImage(ctx->device, ctx->allocator, ctx->msaaColorImage.format,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+        ctx->window.w, ctx->window.h, 1, 1, ctx->sampleCount, &allocation);
+    ctx->msaaColorImage.view = CreateImageView(ctx->device, ctx->msaaColorImage.image, ctx->msaaColorImage.format,
+        VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
+    ctx->msaaColorImage.allocation = allocation;
+}
+
+static void DestroyMSAAColorImage(vulkan_context_t *ctx)
+{
+    vkDestroyImageView(ctx->device, ctx->msaaColorImage.view, NULL);
+    vmaDestroyImage(ctx->allocator, ctx->msaaColorImage.image, ctx->msaaColorImage.allocation);
+}
+
+static inline texture_desc_t MakeBRDFLUTDescription(vulkan_context_t *ctx, void *data)
+{
+    return (texture_desc_t) {
+        .cb = CommandBuffer(ctx),
+        .pipeline = ctx->genBRDFLUTPipeline.pipeline,
+        .pipelineLayout = ctx->genBRDFLUTPipeline.pipelineLayout,
+        .descriptorSet = ctx->descriptorSetTex,
+        .width = 512,
+        .height = 512,
+        .sampler = ctx->lutSampler,
+        .format = VK_FORMAT_R16G16_SFLOAT,
+        .layerCount = 1,
+        .pushConstantData = data,
+        .usesMips = false
+    };
+}
+
+static inline texture_desc_t MakeDiffuseIrradianceDesc(vulkan_context_t *ctx, void *data)
+{
+    return (texture_desc_t) {
+        .cb = CommandBuffer(ctx),
+        .pipeline = ctx->diffuseIrradianceMapPipeline.pipeline,
+        .pipelineLayout = ctx->diffuseIrradianceMapPipeline.pipelineLayout,
+        .descriptorSet = ctx->descriptorSetTex,
+        .width = 64,
+        .height = 64,
+        .sampler = ctx->cubemapSampler,
+        .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .layerCount = 6,
+        .pushConstantData = data,
+        .usesMips = true
+    };
+}
+
+static inline texture_desc_t MakePrefilteredEnvDesc(vulkan_context_t *ctx, void *data)
+{
+    return (texture_desc_t) {
+        .cb = CommandBuffer(ctx),
+        .pipeline = ctx->prefilteredEnvMapPipeline.pipeline,
+        .pipelineLayout = ctx->prefilteredEnvMapPipeline.pipelineLayout,
+        .descriptorSet = ctx->descriptorSetTex,
+        .width = 512,
+        .height = 512,
+        .sampler = ctx->cubemapSampler,
+        .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .layerCount = 6,
+        .pushConstantData = data,
+        .usesMips = true
+    };
+}
+
+static inline texture_desc_t MakeTextureDesc(vulkan_context_t *ctx, u32 layerCount)
+{
+    return (texture_desc_t) {
+        .cb = CommandBuffer(ctx),
+        .descriptorSet = ctx->descriptorSetTex,
+        .sampler = (layerCount == 1) ? ctx->texSampler : ctx->cubemapSampler,
+        .layerCount = layerCount
+    };
+}
+
+static inline u32 GetMipCount(i32 width, i32 height)
+{
+    return (u32)(floor(log2(MAX(width, height)))) + 1;
+}
+
 VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask, VkImageLayout oldLayout, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask, VkImageLayout newLayout, VkImageAspectFlags aspectMask, u32 baseMipLevel, u32 levelCount)
 {
     return (VkImageMemoryBarrier2) {
@@ -39,7 +134,9 @@ VkImageMemoryBarrier2 ImageBarrier(VkImage image, VkPipelineStageFlags2 srcStage
             .baseMipLevel = baseMipLevel,
             .levelCount = levelCount,
             .layerCount = VK_REMAINING_ARRAY_LAYERS
-        }
+        },
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
     };
 }
 
@@ -119,7 +216,8 @@ void VulkanUnloadShader(resource_t *shaderResource)
 
 void VulkanLoadTexture(resource_t *textureResource, const char *path, u32 layerCount)
 {
-    if (!CreateTexture(&textureResource->texture, &gCtx->scratchBuffer, gCtx->device, gCtx->allocator, gCtx->commandPool, gCtx->queue, gCtx->texSampler, path, layerCount)) {
+    texture_desc_t desc = MakeTextureDesc(gCtx, layerCount);
+    if (!CreateTexture(gCtx, &textureResource->texture, desc, textureResource->path, CommandBuffer(gCtx), Fence(gCtx))) {
         LOGE("Unable to load texture %s", path);
     }
 }
@@ -144,7 +242,8 @@ void VulkanShutdown(void)
 
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->texLayout, NULL);
     vkDestroyDescriptorSetLayout(gCtx->device, gCtx->dummyLayout, NULL);
-
+    vkDestroyDescriptorSetLayout(gCtx->device, gCtx->storageImageLayout, NULL);
+    
     vkDestroyDescriptorPool(gCtx->device, gCtx->descriptorPool, NULL);
     vkDestroyCommandPool(gCtx->device, gCtx->commandPool, NULL);
 
@@ -175,14 +274,9 @@ void VulkanShutdown(void)
     vkDestroyImageView(gCtx->device, gCtx->depthImage.view, NULL);
     vmaDestroyImage(gCtx->allocator, gCtx->depthImage.image, gCtx->depthImage.allocation);
 
-    vkDestroyImageView(gCtx->device, gCtx->brdfLut.view, NULL);
-    vmaDestroyImage(gCtx->allocator, gCtx->brdfLut.image, gCtx->brdfLut.allocation);
-
-    vkDestroyImageView(gCtx->device, gCtx->diffuseIrradianceMap.view, NULL);
-    vmaDestroyImage(gCtx->allocator, gCtx->diffuseIrradianceMap.image, gCtx->diffuseIrradianceMap.allocation);
-
-    vkDestroyImageView(gCtx->device, gCtx->prefilteredEnv.view, NULL);
-    vmaDestroyImage(gCtx->allocator, gCtx->prefilteredEnv.image, gCtx->prefilteredEnv.allocation);
+    if (gCtx->sampleCount != VK_SAMPLE_COUNT_1_BIT) {
+        DestroyMSAAColorImage(gCtx);
+    }
 
     vkDestroySwapchainKHR(gCtx->device, gCtx->swapchain, NULL);
     SDL_Vulkan_DestroySurface(gCtx->instance, gCtx->window.surface, NULL);
@@ -190,6 +284,7 @@ void VulkanShutdown(void)
 
     vkDestroySampler(gCtx->device, gCtx->texSampler, NULL);
     vkDestroySampler(gCtx->device, gCtx->cubemapSampler, NULL);
+    vkDestroySampler(gCtx->device, gCtx->lutSampler, NULL);
 
     vmaDestroyAllocator(gCtx->allocator);
 
@@ -199,22 +294,51 @@ void VulkanShutdown(void)
     volkFinalize();
 }
 
-static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, skybox_data_t *skyboxData, VkBuffer indexBuffer, VkDevice device, VkCommandBuffer cb, pipeline_t *pipeline, VkDescriptorSet descriptorSet, VkQueue queue, VkFence fence, VmaAllocator allocator)
+static void RenderBRDFLUT(vulkan_context_t *context, void *data)
 {
-    const uint32_t mipCount = (uint32_t)(floor(log2(dim))) + 1;
+    texture_desc_t *desc = (texture_desc_t *)data;
+    vkCmdBindPipeline(desc->cb, VK_PIPELINE_BIND_POINT_GRAPHICS, desc->pipeline);
+    vkCmdDraw(desc->cb, 3, 1, 0, 0);
+}
+
+static void RenderCubemap(vulkan_context_t *context, void *data)
+{
+    texture_desc_t *desc  = (texture_desc_t *)data;
+    skybox_data_t *skyboxData = (skybox_data_t *)desc->pushConstantData;
+    VkCommandBuffer cb        = desc->cb;
+    VkPipeline pipeline       = desc->pipeline;
+    VkPipelineLayout layout   = desc->pipelineLayout;
+    VkDescriptorSet descSet   = desc->descriptorSet;
+
+    vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(skybox_data_t), skyboxData);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &descSet, 0, NULL);
+    vkCmdBindIndexBuffer(cb, context->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, skyboxData->indexCount, 1, skyboxData->indexOffset, skyboxData->vertexOffset, 0);
+}
+
+static void GenerateCubemap(vulkan_context_t *ctx, texture_resource_t *output, void (*render)(vulkan_context_t *, void*), texture_desc_t desc)
+{
+    VkCommandBuffer cb = desc.cb;
+    VkFormat format = desc.format;
+    i32 width = desc.width;
+    i32 height = desc.height;
+    u32 mipCount = desc.usesMips ? GetMipCount(width, height) : 1;
+    VmaAllocator allocator = ctx->allocator;
+    VkDevice device = ctx->device;
 
     VmaAllocation outputAllocation;
     output->image = CreateImage(device, allocator, format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        dim, dim, mipCount, 6, &outputAllocation);
+        width, height, mipCount, 6, VK_SAMPLE_COUNT_1_BIT, &outputAllocation);
     output->view = CreateImageView(device, output->image, format, VK_IMAGE_ASPECT_COLOR_BIT, mipCount, 6);
     output->allocation = outputAllocation;
     output->format = format;
 
     // Create offscreen image
     VmaAllocation offscreenImageAllocation;
-    VkImage offscreenImage = CreateImage(device, allocator, output->format,
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, dim, dim, 1, 1, &offscreenImageAllocation);
-    VkImageView offscreenView = CreateImageView(device, offscreenImage, output->format, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
+    VkImage offscreenImage = CreateImage(device, allocator, output->format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 
+        width, height, 1, 1, VK_SAMPLE_COUNT_1_BIT, &offscreenImageAllocation);
+    VkImageView offscreenView = CreateImageView(ctx->device, offscreenImage, output->format, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
 
     VK_CHECK(vkResetCommandBuffer(cb, 0));
 
@@ -237,24 +361,6 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
 
     PipelineBarrier(cb, 0, 0, NULL, 1, &colorBarrier);
 
-    vkEndCommandBuffer(cb);
-
-    VkSubmitInfo submitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cb
-    };
-
-    VK_CHECK(vkResetFences(device, 1, &fence));
-    VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
-    VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-
-    vkQueueWaitIdle(queue);
-
-    // layout transition for cubemap faces undefined -> transfer dst
-    VK_CHECK(vkResetCommandBuffer(cb, 0));
-    VK_CHECK(vkBeginCommandBuffer(cb, &cbBeginInfo));
-
     colorBarrier = ImageBarrier(output->image,
         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         0,
@@ -263,15 +369,8 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
         VK_ACCESS_TRANSFER_WRITE_BIT,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount);
+
     PipelineBarrier(cb, 0, 0, NULL, 1, &colorBarrier);
-
-    vkEndCommandBuffer(cb);
-
-    VK_CHECK(vkResetFences(device, 1, &fence));
-    VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
-    VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-
-    vkQueueWaitIdle(queue);
 
     // render all 6 cube faces
     VkRenderingAttachmentInfo colorAttachmentInfo = {
@@ -286,8 +385,8 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
     VkRenderingInfo renderingInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea.extent = {
-            .width = dim,
-            .height = dim
+            .width = width,
+            .height = height
         },
         .layerCount = 1,
         .colorAttachmentCount = 1,
@@ -296,16 +395,16 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
     };
 
     VkViewport viewport = {
-        .width = (float)dim,
-        .height = (float)dim,
+        .width = (float)width,
+        .height = (float)height,
         .minDepth = 0.0f,
         .maxDepth = 1.0f
     };
 
     VkRect2D scissor = {
         .extent = {
-            .width = dim,
-            .height = dim
+            .width = width,
+            .height = height
         }
     };
     // Face order matches your glm list (0..5)
@@ -354,21 +453,14 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
         }}
     };
 
+    skybox_data_t *skyboxData = (skybox_data_t *)desc.pushConstantData;
+
     // Render all cubemap faces
     for (u32 level = 0; level < mipCount; level++) {
         for (u32 face = 0; face < 6; face++) {
-            // layout transition for all cubemap faces
-            VK_CHECK(vkResetCommandBuffer(cb, 0));
 
-            VkCommandBufferBeginInfo cbBeginInfo = {
-                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-            };
-
-            VK_CHECK(vkBeginCommandBuffer(cb, &cbBeginInfo));
-
-            viewport.width  = (float)(dim * powf(0.5f, level));
-            viewport.height = (float)(dim * powf(0.5f, level));
+            viewport.width  = (float)(width * powf(0.5f, level));
+            viewport.height = (float)(height * powf(0.5f, level));
 
             vkCmdSetViewport(cb, 0, 1, &viewport);
             vkCmdSetScissor(cb, 0, 1, &scissor);
@@ -386,12 +478,8 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
             skyboxData->projection = HMM_Perspective_RH_ZO(HMM_PI / 2.0f, 1.0f, 0.1f, 512.0f);
             skyboxData->view = view;
             skyboxData->roughness = (float)level / (float)(mipCount - 1);
-            
-            vkCmdPushConstants(cb, pipeline->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(skybox_data_t), skyboxData);
-            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
-            vkCmdBindIndexBuffer(cb, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cb, skyboxData->indexCount, 1, skyboxData->indexOffset, skyboxData->vertexOffset, 0);
+    
+            RenderCubemap(ctx, &desc);
 
             vkCmdEndRendering(cb);
 
@@ -405,6 +493,7 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
+
             PipelineBarrier(cb, 0, 0, NULL, 1, &offscreenImageBarrier);
 
             // copy from offscreen image to cubemap image
@@ -442,25 +531,8 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
                 VK_IMAGE_ASPECT_COLOR_BIT, 0, 1);
 
             PipelineBarrier(cb, 0, 0, NULL, 1, &offscreenImageBarrier);
-
-            vkEndCommandBuffer(cb);
-
-            VkSubmitInfo submitInfo = {
-                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .commandBufferCount = 1,
-                .pCommandBuffers    = &cb
-            };
-
-            VK_CHECK(vkResetFences(device, 1, &fence));
-            VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
-            VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-            vkQueueWaitIdle(queue);
         }
     }
-
-    // Transition the generated cubemap from transfer dst to shader read-only
-    VK_CHECK(vkResetCommandBuffer(cb, 0));
-    VK_CHECK(vkBeginCommandBuffer(cb, &cbBeginInfo));
 
     VkImageMemoryBarrier2 outputBarrier = ImageBarrier(
         output->image,
@@ -484,25 +556,51 @@ static void GenerateIBLCubemap(image_t *output, int32_t dim, VkFormat format, sk
         .pCommandBuffers = &cb
     };
 
+    VkFence fence   = Fence(ctx);
+    VkQueue queue   = ctx->queue;
+
     VK_CHECK(vkResetFences(device, 1, &fence));
     VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo2, fence));
     VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-    vkQueueWaitIdle(queue);
 
     vkDestroyImageView(device, offscreenView, NULL);
     vmaDestroyImage(allocator, offscreenImage, offscreenImageAllocation);
+
+    // Update descriptor set
+    VkDescriptorImageInfo imageInfo = {
+        .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+        .imageView   = output->view,
+        .sampler     = desc.sampler
+    };
+
+    VkWriteDescriptorSet writeDescSet = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = desc.descriptorSet,
+        .dstBinding = 0,
+        .dstArrayElement = output->textureIndex,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &imageInfo,
+    };
+
+    vkUpdateDescriptorSets(device, 1, &writeDescSet, 0, NULL);
 }
 
-static void GenerateBRDFLUT(image_t *brdfLut, VkDevice device, VkCommandBuffer cb, pipeline_t *pipeline, VkQueue queue, VkFence fence, VmaAllocator allocator)
+static void GenerateTexture(vulkan_context_t *ctx, texture_resource_t *output, void (*render)(vulkan_context_t *, void *),  texture_desc_t desc)
 {
-    VmaAllocation brdfLutAllocation;
-    const int32_t brdfLutDim = 512;
-    VkFormat brdfLutFormat = VK_FORMAT_R16G16_SFLOAT;
-    brdfLut->image = CreateImage(device, allocator, brdfLutFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
-        brdfLutDim, brdfLutDim, 1, 1, &brdfLutAllocation);
-    brdfLut->view  = CreateImageView(device, brdfLut->image, brdfLutFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
-    brdfLut->allocation = brdfLutAllocation;
-    brdfLut->format = brdfLutFormat;
+    VkCommandBuffer cb = desc.cb;
+    VkFormat format = desc.format;
+    i32 width = desc.width;
+    i32 height = desc.height;
+    u32 mipCount = desc.usesMips ? GetMipCount(width, height) : 1;
+    u32 layerCount = desc.layerCount;
+
+    VmaAllocation allocation;
+    output->image = CreateImage(ctx->device, ctx->allocator, format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
+        width, height, mipCount, layerCount, VK_SAMPLE_COUNT_1_BIT, &allocation);
+    output->view  = CreateImageView(ctx->device, output->image, format, VK_IMAGE_ASPECT_COLOR_BIT, mipCount, layerCount);
+    output->allocation = allocation;
+    output->format = format;
 
     VK_CHECK(vkResetCommandBuffer(cb, 0));
     
@@ -513,22 +611,22 @@ static void GenerateBRDFLUT(image_t *brdfLut, VkDevice device, VkCommandBuffer c
 
     VK_CHECK(vkBeginCommandBuffer(cb, &cbBeginInfo));
 
-    // Layout transition for bfrd lut image
-    VkImageMemoryBarrier2 colorBarrier = ImageBarrier(brdfLut->image, 
+    // Layout transition for output image
+    VkImageMemoryBarrier2 colorBarrier = ImageBarrier(output->image, 
         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         0,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
         VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount
     );
 
     PipelineBarrier(cb, 0, 0, NULL, 1, &colorBarrier);
 
     VkRenderingAttachmentInfo colorAttachmentInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = brdfLut->view,
+        .imageView = output->view,
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -538,8 +636,8 @@ static void GenerateBRDFLUT(image_t *brdfLut, VkDevice device, VkCommandBuffer c
     VkRenderingInfo renderingInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea.extent = {
-            .width  = 512,
-            .height = 512
+            .width  = width,
+            .height = height
         },
         .layerCount = 1,
         .colorAttachmentCount = 1,
@@ -552,36 +650,36 @@ static void GenerateBRDFLUT(image_t *brdfLut, VkDevice device, VkCommandBuffer c
     VkViewport vp = {
         .x        = 0,
         .y        = 0,
-        .width    = (f32)512,
-        .height   = (f32)512,
+        .width    = (f32)width,
+        .height   = (f32)height,
         .minDepth = 0.0f,
         .maxDepth = 1.0f
     };
 
-    vkCmdSetViewport(cb, 0, 1, &vp);
-
     VkRect2D scissor = {
         .offset = { 0, 0},
-        .extent = { 512, 512 }
+        .extent = { width, height }
     };
 
+    vkCmdSetViewport(cb, 0, 1, &vp);
     vkCmdSetScissor(cb, 0, 1, &scissor);
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->pipeline);
-    vkCmdDraw(cb, 3, 1, 0, 0);
+
+    render(ctx, &desc);
+
     vkCmdEndRendering(cb);
 
-    // Transition BRDF LUT image layout to shader read-only optimal for use as a lookup table in PBR shader
-    VkImageMemoryBarrier2 lutBarrier = ImageBarrier(brdfLut->image, 
+    // Transition image layout to shader read only optimal
+    VkImageMemoryBarrier2 readBarrier = ImageBarrier(output->image, 
         VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
         VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
         VK_ACCESS_SHADER_READ_BIT,
         VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount
     );
 
-    PipelineBarrier(cb, 0, 0, NULL, 1, &lutBarrier);
+    PipelineBarrier(cb, 0, 0, NULL, 1, &readBarrier);
 
     vkEndCommandBuffer(cb);
 
@@ -591,11 +689,154 @@ static void GenerateBRDFLUT(image_t *brdfLut, VkDevice device, VkCommandBuffer c
         .pCommandBuffers = &cb
     };
     
-    VK_CHECK(vkResetFences(device, 1, &fence));
-    VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
-    VK_CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+    VK_CHECK(vkResetFences(ctx->device, 1, &ctx->fences[ctx->frameIndex]));
+    VK_CHECK(vkQueueSubmit(ctx->queue, 1, &submitInfo, ctx->fences[ctx->frameIndex]));
+    VK_CHECK(vkWaitForFences(ctx->device, 1, &ctx->fences[ctx->frameIndex], VK_TRUE, UINT64_MAX));
 
-    vkQueueWaitIdle(queue);
+    // Update descriptor set
+    VkDescriptorImageInfo brdflutInfo = {
+        .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
+        .imageView   = output->view,
+        .sampler     = desc.sampler
+    };
+
+    VkWriteDescriptorSet writeDescSet = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = ctx->descriptorSetTex,
+        .dstBinding = 0,
+        .dstArrayElement = output->textureIndex, 
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &brdflutInfo
+    };
+
+    vkUpdateDescriptorSets(ctx->device, 1, &writeDescSet, 0, NULL);
+}
+
+void VulkanGenerateTexture(resource_t *textureResource)
+{
+    if (textureResource->path == gCtx->brdfLutPath) {
+        texture_desc_t desc = MakeBRDFLUTDescription(gCtx, NULL);
+        GenerateTexture(gCtx, &textureResource->texture, RenderBRDFLUT, desc);
+    } else if (textureResource->path == gCtx->diffuseIrradianceMapPath) {
+        texture_desc_t desc = MakeDiffuseIrradianceDesc(gCtx, &gCtx->skyboxData[gCtx->frameIndex]);
+        GenerateCubemap(gCtx, &textureResource->texture, RenderCubemap, desc);
+    } else if (textureResource->path == gCtx->prefilteredEnvMapPath) {
+        texture_desc_t desc = MakePrefilteredEnvDesc(gCtx, &gCtx->skyboxData[gCtx->frameIndex]);
+        GenerateCubemap(gCtx, &textureResource->texture, RenderCubemap, desc);
+    } else {
+        LOGE("Unknown generated texture path %s", textureResource->path);
+        LV_ASSERT(false);
+    }
+}
+
+// Only create the image and write descriptors. Do not render image yet
+static void GenerateInitialOceanSpectrum(vulkan_context_t *ctx, texture_resource_t *textureResource)
+{
+    VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    i32 width  = 1024;
+    i32 height = 1024;
+
+    VmaAllocation alloc;
+    VkImage image = CreateImage(ctx->device, ctx->allocator, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        width, height, 1, 1, VK_SAMPLE_COUNT_1_BIT, &alloc);
+    VkImageView view = CreateImageView(ctx->device, image, format, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1);
+
+    textureResource->image = image;
+    textureResource->view = view;
+    textureResource->allocation = alloc;
+
+    //transition layout
+    VkCommandBuffer cb = CommandBuffer(ctx);
+    VkCommandBufferBeginInfo cbOneTimeBI = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+
+    VK_CHECK(vkBeginCommandBuffer(cb, &cbOneTimeBI));
+    
+    VkImageMemoryBarrier2 barrier = ImageBarrier(image,
+            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 
+            0, 
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 
+            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+            VK_IMAGE_LAYOUT_GENERAL, 
+            VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+    );
+
+    PipelineBarrier(cb, 0, 0, NULL, 1, &barrier);
+    vkEndCommandBuffer(cb);
+
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb
+    };
+    
+    VkFence fence = Fence(ctx);
+    VK_CHECK(vkResetFences(ctx->device, 1, &fence));
+    VK_CHECK(vkQueueSubmit(ctx->queue, 1, &submitInfo, fence));
+    VK_CHECK(vkWaitForFences(ctx->device, 1, &fence, VK_TRUE, UINT64_MAX));
+
+    VkDescriptorImageInfo storageInfo = {
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .imageView = view,
+        .sampler = VK_NULL_HANDLE
+    };
+
+    VkDescriptorImageInfo sampledInfo = {
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .imageView = view,
+        .sampler = ctx->texSampler
+    };
+
+    VkWriteDescriptorSet writes[2] = {
+        { 
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 
+            .dstSet = ctx->descriptorSetTex, 
+            .dstBinding = 0, 
+            .dstArrayElement = textureResource->textureIndex,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &sampledInfo
+        },
+        { 
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, 
+            .dstSet = ctx->descriptorSetStorageImage, 
+            .dstBinding = 0, 
+            .dstArrayElement = textureResource->storageIndex,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .pImageInfo = &storageInfo
+        }
+    };
+
+    vkUpdateDescriptorSets(ctx->device, 2, writes, 0, NULL);
+}
+
+void VulkanGenerateStorageImage(resource_t *textureResource)
+{
+    if (textureResource->path == gCtx->initialOceanSpectrumPath0 ||
+        textureResource->path == gCtx->initialOceanSpectrumPath1 ||
+        textureResource->path == gCtx->initialOceanSpectrumPath2 || 
+        textureResource->path == gCtx->initialOceanSpectrumPath3) {
+        GenerateInitialOceanSpectrum(gCtx, &textureResource->texture);
+    } else {
+        LOGE("Unknown generated texture path %s", textureResource->path);
+        LV_ASSERT(false);
+    }
+}
+
+static texture_resource_t *LoadGeneratedTexture(vulkan_context_t *ctx, const char *uri)
+{
+    texture_resource_t *result = NULL;
+
+    resource_t *res = ResourceSystemLoadResource(uri);
+    if (res) {
+        result = &res->texture;
+    }
+    return result;
 }
 
 static void VulkanLoadResources(vulkan_context_t *ctx)
@@ -688,48 +929,63 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
 
     ctx->texSampler     = CreateTextureSampler(ctx->device, 16, 16.0f);
     ctx->cubemapSampler = CreateCubemapSampler(ctx->device, 16, 1.0f);
+    ctx->lutSampler     = CreateLUTSampler(ctx->device, 1, 1.0f);
 
+    // brdf lut, diffuse irradiance, prefiltered env, plus the four ocean spectrum images.
+    // Storage images take a slot in the sampled array as well, since the water shader reads them.
+    const u32 genTextureCount = 3 + 4;
     const resource_t **textureResources = ResourceSystemGetTextures(ScratchArena());
-    u32 texCount = ArrayCount(textureResources) + 3; // plus 3 for genbrdflut, diffuse irradiance and prefiltered env map
+    u32 texCount = ArrayCount(textureResources) + genTextureCount;
+    const u32 storageImageCount = 128; // TODO: Completely arbitrary
 
-    ctx->texLayout    = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount, true);
-    ctx->dummyLayout  = CreateDescriptorSetLayout(ctx->device, 0, 0, 0, false);
-
-    VkDescriptorPoolSize poolSizes[1] = { 
+    ctx->texLayout          = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, texCount, true);
+    ctx->dummyLayout        = CreateDescriptorSetLayout(ctx->device, 0, 0, 0, false);
+    ctx->storageImageLayout = CreateDescriptorSetLayout(ctx->device, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, storageImageCount, true);
+    
+    VkDescriptorPoolSize poolSizes[2] = { 
         { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,.descriptorCount = texCount }, 
+        { .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = storageImageCount }
     };
 
     VkDescriptorPoolCreateInfo descPoolCI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = 1,
-        .poolSizeCount = 1,
+        .maxSets = ARRAY_SIZE(poolSizes),
+        .poolSizeCount = ARRAY_SIZE(poolSizes),
         .pPoolSizes = poolSizes
     };
 
     VK_CHECK(vkCreateDescriptorPool(ctx->device, &descPoolCI, NULL, &ctx->descriptorPool));
 
-    // Finally we can write descriptors
+    // Allocate descriptor sets
+    u32 descriptorSetCounts[2] = { texCount, storageImageCount };
+    VkDescriptorSetLayout setLayouts[2] = { ctx->texLayout, ctx->storageImageLayout };
+
     VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescCountAI = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT,
-        .descriptorSetCount = 1,
-        .pDescriptorCounts = &texCount,
+        .descriptorSetCount = 2,
+        .pDescriptorCounts = descriptorSetCounts,
     };
 
     VkDescriptorSetAllocateInfo texDescSetAlloc = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .pNext = &variableDescCountAI,
         .descriptorPool = ctx->descriptorPool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &ctx->texLayout,
+        .descriptorSetCount = 2,
+        .pSetLayouts = setLayouts,
     };
 
-    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &texDescSetAlloc, &ctx->descriptorSetTex));
+    VkDescriptorSet sets[2];
+    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &texDescSetAlloc, sets));
 
+    ctx->descriptorSetTex = sets[0];
+    ctx->descriptorSetStorageImage = sets[1];
+
+    // write texture and cubemap descriptor set
     VkDescriptorImageInfo *textureDescriptors = NULL;
     // Allocating extra memory for BRDF Lut, irradiance cube map and pre-filtered environment cube map
     ArrayInitWithArena(textureDescriptors, ScratchArena(), texCount);
 
-    for (u32 i = 0; i < texCount - 3; i++) {
+    for (u32 i = 0; i < texCount - genTextureCount; i++) {
         VkDescriptorImageInfo info = {0};
         info.imageLayout = textureResources[i]->texture.layout;
         info.imageView   = textureResources[i]->texture.view;
@@ -752,58 +1008,36 @@ static void VulkanLoadResources(vulkan_context_t *ctx)
 
     VkFormat imageFormat = ctx->swapchainImages[0].format;
     VkFormat depthFormat = ctx->depthImage.format;
-    CreateGraphicsPipeline(&ctx->pipeline, "shader.spv", ctx->device, imageFormat, depthFormat, sizeof(pbr_data_t), ctx->texLayout, VK_TRUE, VK_CULL_MODE_BACK_BIT);
-    CreateGraphicsPipeline(&ctx->skyboxPipeline, "skybox.spv", ctx->device, imageFormat, depthFormat, sizeof(skybox_data_t), ctx->texLayout, VK_FALSE, VK_CULL_MODE_NONE);
-    CreateGraphicsPipeline(&ctx->genBRDFLUTPipeline, "genbrdflut.spv", ctx->device, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_UNDEFINED, 0, ctx->dummyLayout, VK_FALSE, VK_CULL_MODE_NONE);
-    CreateGraphicsPipeline(&ctx->diffuseIrradianceMapPipeline, "diffuse_irradiance.spv", ctx->device, VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_UNDEFINED, sizeof(skybox_data_t), ctx->texLayout, VK_FALSE, VK_CULL_MODE_NONE);
-    CreateGraphicsPipeline(&ctx->prefilteredEnvMapPipeline, "prefiltered_env_map.spv", ctx->device, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_UNDEFINED, sizeof(skybox_data_t), ctx->texLayout, VK_FALSE, VK_CULL_MODE_NONE);
-    CreateComputePipeline(&ctx->computePipeline, "compute_shader.spv", ctx->device, sizeof(pbr_data_t));
+    // Main scene pipelines render into the multisampled targets, the offscreen bake
+    // pipelines render into single sampled images
+    CreateGraphicsPipeline(&ctx->pipeline, "shader.spv", ctx->device, imageFormat, depthFormat, sizeof(pbr_data_t), setLayouts, 2, VK_TRUE, VK_CULL_MODE_BACK_BIT, ctx->sampleCount);
+    CreateGraphicsPipeline(&ctx->skyboxPipeline, "skybox.spv", ctx->device, imageFormat, depthFormat, sizeof(skybox_data_t), setLayouts, 2, VK_FALSE, VK_CULL_MODE_NONE, ctx->sampleCount);
+    CreateGraphicsPipeline(&ctx->genBRDFLUTPipeline, "genbrdflut.spv", ctx->device, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_UNDEFINED, 0, setLayouts, 2, VK_FALSE, VK_CULL_MODE_NONE, VK_SAMPLE_COUNT_1_BIT);
+    CreateGraphicsPipeline(&ctx->diffuseIrradianceMapPipeline, "diffuse_irradiance.spv", ctx->device, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_UNDEFINED, sizeof(skybox_data_t), setLayouts, 2, VK_FALSE, VK_CULL_MODE_NONE, VK_SAMPLE_COUNT_1_BIT);
+    CreateGraphicsPipeline(&ctx->prefilteredEnvMapPipeline, "prefiltered_env_map.spv", ctx->device, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_UNDEFINED, sizeof(skybox_data_t), setLayouts, 2, VK_FALSE, VK_CULL_MODE_NONE, VK_SAMPLE_COUNT_1_BIT);
+    
+    CreateComputePipeline(&ctx->computePipeline, "compute_shader.spv", ctx->device, NULL, 0, sizeof(pbr_data_t));
+    
+    ctx->brdfLutPath = ResourceSystemMakeFullPath("brdfLut.img", RESOURCE_TYPE_IMAGE);
+    ctx->diffuseIrradianceMapPath = ResourceSystemMakeFullPath("diffuseIrradianceMap.img", RESOURCE_TYPE_IMAGE);
+    ctx->prefilteredEnvMapPath = ResourceSystemMakeFullPath("prefilteredEnvMap.img", RESOURCE_TYPE_IMAGE);
+    ctx->initialOceanSpectrumPath0 = ResourceSystemMakeFullPath("initialOceanSpectrum0.simg", RESOURCE_TYPE_STORAGE_IMAGE);
+    ctx->initialOceanSpectrumPath1 = ResourceSystemMakeFullPath("initialOceanSpectrum1.simg", RESOURCE_TYPE_STORAGE_IMAGE);
+    ctx->initialOceanSpectrumPath2 = ResourceSystemMakeFullPath("initialOceanSpectrum2.simg", RESOURCE_TYPE_STORAGE_IMAGE);
+    ctx->initialOceanSpectrumPath3 = ResourceSystemMakeFullPath("initialOceanSpectrum3.simg", RESOURCE_TYPE_STORAGE_IMAGE);
 
-    // Generate source images for pbr
-    VkCommandBuffer cb = ctx->commandBuffers[ctx->frameIndex];
-    GenerateBRDFLUT(&ctx->brdfLut, ctx->device, cb, &ctx->genBRDFLUTPipeline, ctx->queue, ctx->fences[ctx->frameIndex], ctx->allocator);
-    ctx->brdfLut.index = ArrayCount(textureDescriptors);
+    ctx->brdfLut = LoadGeneratedTexture(ctx, "brdfLut.img");
+    ctx->diffuseIrradianceMap = LoadGeneratedTexture(ctx, "diffuseIrradianceMap.img");
+    ctx->prefilteredEnvMap = LoadGeneratedTexture(ctx, "prefilteredEnvMap.img");
 
-    GenerateIBLCubemap(&ctx->diffuseIrradianceMap, 64, VK_FORMAT_R32G32B32A32_SFLOAT, &ctx->skyboxData[ctx->frameIndex], ctx->indexBuffer.buffer, ctx->device, cb,
-        &ctx->diffuseIrradianceMapPipeline, ctx->descriptorSetTex, ctx->queue, ctx->fences[ctx->frameIndex], ctx->allocator);
-    ctx->diffuseIrradianceMap.index = ArrayCount(textureDescriptors) + 1;
+    // Storage images need to be created first?
+    ctx->initialOceanSpectrum0 = LoadGeneratedTexture(ctx, "initialOceanSpectrum0.simg");
+    ctx->initialOceanSpectrum1 = LoadGeneratedTexture(ctx, "initialOceanSpectrum1.simg");
+    ctx->initialOceanSpectrum2 = LoadGeneratedTexture(ctx, "initialOceanSpectrum2.simg");
+    ctx->initialOceanSpectrum3 = LoadGeneratedTexture(ctx, "initialOceanSpectrum3.simg");
 
-    GenerateIBLCubemap(&ctx->prefilteredEnv, 512, VK_FORMAT_R16G16B16A16_SFLOAT, &ctx->skyboxData[ctx->frameIndex], ctx->indexBuffer.buffer, ctx->device, cb,
-        &ctx->prefilteredEnvMapPipeline, ctx->descriptorSetTex, ctx->queue, ctx->fences[ctx->frameIndex], ctx->allocator);
-    ctx->prefilteredEnv.index = ArrayCount(textureDescriptors) + 2;
+    //their layouts need to be transitioned
 
-    // We can finally push the generated images
-    VkDescriptorImageInfo brdflutInfo = {
-        .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-        .imageView   = ctx->brdfLut.view,
-        .sampler     = ctx->cubemapSampler
-    };
-
-    VkDescriptorImageInfo diffuseIrradianceInfo = {
-        .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-        .imageView   = ctx->diffuseIrradianceMap.view,
-        .sampler     = ctx->cubemapSampler
-    };
-
-    VkDescriptorImageInfo prefilteredEnvInfo = {
-        .imageLayout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-        .imageView   = ctx->prefilteredEnv.view,
-        .sampler     = ctx->cubemapSampler
-    };
-
-    VkDescriptorImageInfo genImageInfo[3] = { brdflutInfo, diffuseIrradianceInfo, prefilteredEnvInfo };
-
-    VkWriteDescriptorSet writeDescSet2 = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ctx->descriptorSetTex,
-        .dstBinding = 0,
-        .dstArrayElement = ArrayCount(textureDescriptors),
-        .descriptorCount = 3,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = genImageInfo,
-    };
-
-    vkUpdateDescriptorSets(ctx->device, 1, &writeDescSet2, 0, NULL);
 }
 
 void VulkanRender(void)
@@ -840,9 +1074,9 @@ void VulkanRender(void)
     globals.camPos = RendererGetCameraPosition();
     globals.lightDir = (vec3_t){1.0f, 1.0f, 1.0f};
     globals.lightDir = HMM_Norm(globals.lightDir);
-    globals.brdflutIndex = gCtx->brdfLut.index;
-    globals.diffuseIrradianceIndex = gCtx->diffuseIrradianceMap.index;
-    globals.prefilteredEnvIndex = gCtx->prefilteredEnv.index;
+    globals.brdflutIndex = gCtx->brdfLut->textureIndex;
+    globals.diffuseIrradianceIndex = gCtx->diffuseIrradianceMap->textureIndex;
+    globals.prefilteredEnvIndex = gCtx->prefilteredEnvMap->textureIndex;
 
     UploadBuffer(&gCtx->shaderGlobalsBuffers[gCtx->frameIndex], &globals, sizeof(globals_t), 0);
 
@@ -894,16 +1128,38 @@ void VulkanRender(void)
         VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
         0, 1);
 
-    VkImageMemoryBarrier2 outputBarriers[] = {colorBarrier, depthBarrier};
+    b8 msaaEnabled = (gCtx->sampleCount != VK_SAMPLE_COUNT_1_BIT);
 
-    PipelineBarrier(cb, 0, 0, NULL, ARRAY_SIZE(outputBarriers), outputBarriers);
+    VkImageMemoryBarrier2 outputBarriers[3] = {colorBarrier, depthBarrier};
+    u32 outputBarrierCount = 2;
 
+    if (msaaEnabled) {
+        // The multisampled target is the actual render target, the swapchain image above
+        // is only the resolve destination
+        outputBarriers[outputBarrierCount++] = ImageBarrier(gCtx->msaaColorImage.image,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0, 1);
+    }
+
+    PipelineBarrier(cb, 0, 0, NULL, outputBarrierCount, outputBarriers);
+
+    // With MSAA the samples are averaged into the swapchain image by the resolve, so the
+    // multisampled contents themselves are thrown away
     VkRenderingAttachmentInfo colorAttachmentInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = gCtx->swapchainImages[imageIndex].view,
+        .imageView = msaaEnabled ? gCtx->msaaColorImage.view : gCtx->swapchainImages[imageIndex].view,
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .resolveMode = msaaEnabled ? VK_RESOLVE_MODE_AVERAGE_BIT : VK_RESOLVE_MODE_NONE,
+        .resolveImageView = msaaEnabled ? gCtx->swapchainImages[imageIndex].view : VK_NULL_HANDLE,
+        .resolveImageLayout = msaaEnabled ? VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .storeOp = msaaEnabled ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE,
         .clearValue = {.color = {1.0f, 1.0f, 0.0f, 1.0f}},
     };
 
@@ -976,7 +1232,7 @@ void VulkanRender(void)
         .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
         .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         .dstAccessMask = 0,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         .image = gCtx->swapchainImages[imageIndex].image,
         .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1022,7 +1278,7 @@ void VulkanRender(void)
 
     if (gCtx->windowResized) {
         if (SDL_GetWindowSize(gCtx->window.window, &gCtx->window.w, &gCtx->window.h)) {
-            printf("Window resized: %ux%u\n", gCtx->window.w, gCtx->window.h);
+            LOGI("Window resized: %ux%u", gCtx->window.w, gCtx->window.h);
         }
         gCtx->windowResized = false;
 
@@ -1067,8 +1323,13 @@ void VulkanRender(void)
         vmaDestroyImage(gCtx->allocator, gCtx->depthImage.image, gCtx->depthImage.allocation);
         vkDestroyImageView(gCtx->device, gCtx->depthImage.view, NULL);
 
-        gCtx->depthImage.image = CreateImage(gCtx->device, gCtx->allocator, gCtx->depthImage.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, gCtx->window.w, gCtx->window.h, 1, 1, &gCtx->depthImage.allocation);
+        gCtx->depthImage.image = CreateImage(gCtx->device, gCtx->allocator, gCtx->depthImage.format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, gCtx->window.w, gCtx->window.h, 1, 1, gCtx->sampleCount, &gCtx->depthImage.allocation);
         gCtx->depthImage.view = CreateImageView(gCtx->device, gCtx->depthImage.image, gCtx->depthImage.format, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1);
+
+        if (gCtx->sampleCount != VK_SAMPLE_COUNT_1_BIT) {
+            DestroyMSAAColorImage(gCtx);
+            CreateMSAAColorImage(gCtx);
+        }
     }
 }
 
@@ -1086,11 +1347,6 @@ void VulkanHotReload(vulkan_context_t *ctx)
 
 void VulkanInit(vulkan_context_t *ctx)
 {
-    int rc = system("ninja compile_shaders");
-    if (rc != 0) {
-        printf("Unable to compile shaders\n");
-    }
-
     VkResult volkResult = volkInitialize();
     if (volkResult != VK_SUCCESS) {
         LOGF("Failed to initialize Volk: %d", volkResult);
@@ -1133,6 +1389,13 @@ void VulkanInit(vulkan_context_t *ctx)
     };
 
     vkGetPhysicalDeviceProperties2(ctx->physicalDevice, &deviceProperties);
+
+    // Color and depth attachments in one render pass must agree on the sample count,
+    // so only take counts both support
+    VkSampleCountFlags sampleCounts = deviceProperties.properties.limits.framebufferColorSampleCounts &
+                                      deviceProperties.properties.limits.framebufferDepthSampleCounts;
+    ctx->sampleCount = (sampleCounts & VK_SAMPLE_COUNT_8_BIT) ? VK_SAMPLE_COUNT_8_BIT : VK_SAMPLE_COUNT_1_BIT;
+    LOGI("MSAA sample count: %u", (u32)ctx->sampleCount);
 
     u32 queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(ctx->physicalDevice, &queueFamilyCount, NULL);
@@ -1308,11 +1571,16 @@ void VulkanInit(vulkan_context_t *ctx)
     LV_ASSERT(depthFormat != VK_FORMAT_UNDEFINED);
 
     VmaAllocation depthAllocation;
-    ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
-        ctx->window.w, ctx->window.h, 1, 1, &depthAllocation);
+    ctx->depthImage.image = CreateImage(ctx->device, ctx->allocator, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        ctx->window.w, ctx->window.h, 1, 1, ctx->sampleCount, &depthAllocation);
     ctx->depthImage.view = CreateImageView(ctx->device, ctx->depthImage.image, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 1);
     ctx->depthImage.format = depthFormat;
     ctx->depthImage.allocation = depthAllocation;
+
+    ctx->msaaColorImage.format = imageFormat;
+    if (ctx->sampleCount != VK_SAMPLE_COUNT_1_BIT) {
+        CreateMSAAColorImage(ctx);
+    }
 
     CreateBuffer(&ctx->scratchBuffer, ctx->device, 128 * 1024 * 1024, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO,
         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, ctx->allocator);

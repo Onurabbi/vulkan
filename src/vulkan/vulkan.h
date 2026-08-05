@@ -14,4 +14,7 @@ void VulkanUnloadTexture(resource_t *textureResource);
 void VulkanLoadShader(resource_t *shaderResource, const char *path, memory_arena_t *scratchArena, memory_arena_t *permanentArena);
 void VulkanUnloadShader(resource_t *shaderResource);
 
+void VulkanGenerateTexture(resource_t *textureResource);
+void VulkanGenerateStorageImage(resource_t *textureResource);
+
 #endif

@@ -140,6 +140,25 @@ typedef struct {
 } skybox_data_t;
 
 typedef struct {
+    f32 scale; // used to scale the spectrum [1.0 - 5.0]
+    f32 spreadBlend; // used to blend between agitated water motion and wind direction [0.0 1.0]
+    f32 swell; // Influences wave choppiness [0.0 1.0]
+    f32 gamma; // defines spectrum peak [0.0 7.0]
+    f32 shortWavesFade; // [0.0 1.0]
+    f32 windDirection; // [0.0 360.0]
+    f32 fetch; // distance over which wind impacts wave formation [0.0 10000.0]
+    f32 windSpeed; // [0.0 100.0]
+    f32 angle;
+    f32 alpha;
+    f32 peakOmega;
+}jonswap_data_t;
+
+typedef struct {
+    VkDeviceAddress jonswap;
+    u32 seed;
+} initial_ocean_spectrum_data_t;
+
+typedef struct {
     VkDeviceAddress globalsAddress;
     VkDeviceAddress meshAddress;
     VkDeviceAddress drawCommandAddress;
@@ -156,6 +175,23 @@ typedef struct {
 } pipeline_t;
 
 typedef struct {
+    const char       *path;
+    VkCommandBuffer  cb;
+    VkPipeline       pipeline;
+    VkPipelineLayout pipelineLayout;
+    VkDescriptorSet  descriptorSet;
+    VkSampler        sampler;
+    VkFormat         format;
+    i32              width;
+    i32              height;
+    u32              layerCount;
+    void             *pushConstantData;
+    b8               usesMips;
+} texture_desc_t;
+
+typedef struct texture_resource_t texture_resource_t;
+
+typedef struct {
     VkInstance instance;
     VkDevice device;
     VkPhysicalDevice physicalDevice;
@@ -163,10 +199,26 @@ typedef struct {
     VkSwapchainKHR swapchain;
     image_t swapchainImages[MAX_SWAPCHAIN_IMAGES];
     image_t depthImage;
-    image_t brdfLut;
-    image_t diffuseIrradianceMap;
-    image_t prefilteredEnv;
+    image_t msaaColorImage; // multisampled color target, resolved into the swapchain image
+    VkSampleCountFlagBits sampleCount;
     u32 swapchainImageCount;
+
+    const char *brdfLutPath;
+    const char *diffuseIrradianceMapPath;
+    const char *prefilteredEnvMapPath;
+    const char *initialOceanSpectrumPath0;
+    const char *initialOceanSpectrumPath1;
+    const char *initialOceanSpectrumPath2;
+    const char *initialOceanSpectrumPath3;
+
+    texture_resource_t *brdfLut;
+    texture_resource_t *diffuseIrradianceMap;
+    texture_resource_t *prefilteredEnvMap;
+    texture_resource_t *initialOceanSpectrum0;
+    texture_resource_t *initialOceanSpectrum1;
+    texture_resource_t *initialOceanSpectrum2;
+    texture_resource_t *initialOceanSpectrum3;
+    
     u32 queueFamily;
     VkQueue queue;
     buffer_t vertexBuffer;
@@ -180,11 +232,14 @@ typedef struct {
     buffer_t scratchBuffer;
     VmaAllocator allocator;
     VkDescriptorSetLayout texLayout;
+    VkDescriptorSetLayout storageImageLayout;
     VkDescriptorSetLayout dummyLayout;
     VkSampler texSampler;
     VkSampler cubemapSampler;
+    VkSampler lutSampler;
     VkDescriptorPool descriptorPool;
     VkDescriptorSet descriptorSetTex;
+    VkDescriptorSet descriptorSetStorageImage;
     VkFence fences[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore presentSemaphores[MAX_FRAMES_IN_FLIGHT];//max frames in flight
     VkSemaphore renderSemaphores[MAX_SWAPCHAIN_IMAGES]; //swapchain image count

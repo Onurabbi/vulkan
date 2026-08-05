@@ -176,7 +176,7 @@ static size_t GetImageSize(u32 width, u32 height, u32 levels, u32 layers, VkForm
 	return result * layers;
 }
 
-b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device, VmaAllocator allocator, VkCommandPool pool, VkQueue queue, VkSampler sampler, const char *path, u32 layerCount)
+b8 CreateTexture(vulkan_context_t *ctx, texture_resource_t *texture, texture_desc_t desc, const char *path, VkCommandBuffer cb, VkFence fence)
 {
     b8 success = false;
     FILE *file = fopen(path, "rb");
@@ -228,17 +228,17 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 
     u32 mipLevels = header.dwMipMapCount ? header.dwMipMapCount : 1;
 
-    size_t imageSize = GetImageSize(header.dwWidth, header.dwHeight, mipLevels, layerCount, format);
+    size_t imageSize = GetImageSize(header.dwWidth, header.dwHeight, mipLevels, desc.layerCount, format);
 
-	if (scratch->size < imageSize) {
+	if (ctx->scratchBuffer.size < imageSize) {
 	    LV_ASSERT(false);
 	    goto exit;
 	}
 
-	texture->image = CreateImage(device, allocator, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        header.dwWidth, header.dwHeight, mipLevels, layerCount, &texture->allocation);
+	texture->image = CreateImage(ctx->device, ctx->allocator, format, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        header.dwWidth, header.dwHeight, mipLevels, desc.layerCount, VK_SAMPLE_COUNT_1_BIT, &texture->allocation);
 
-	size_t readSize = fread(scratch->allocInfo.pMappedData, 1, imageSize, file);
+	size_t readSize = fread(ctx->scratchBuffer.allocInfo.pMappedData, 1, imageSize, file);
 	if (readSize != imageSize) {
 	    LV_ASSERT(false);
 	    goto exit;
@@ -249,28 +249,14 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 	    goto exit;
 	}
 
-    texture->view = CreateImageView(device, texture->image, format, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels, layerCount);
-    VkFenceCreateInfo fenceOneTimeCI = {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-    };
-
-    VkFence fenceOneTime;
-    VK_CHECK(vkCreateFence(device, &fenceOneTimeCI, NULL, &fenceOneTime));
-    VkCommandBufferAllocateInfo cbOneTimeAI = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = pool,
-        .commandBufferCount = 1,
-    };
-
-    VkCommandBuffer cbOneTime;
-    VK_CHECK(vkAllocateCommandBuffers(device, &cbOneTimeAI, &cbOneTime));
+    texture->view = CreateImageView(ctx->device, texture->image, format, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels, desc.layerCount);
 
     VkCommandBufferBeginInfo cbOneTimeBI = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
 
-    VK_CHECK(vkBeginCommandBuffer(cbOneTime, &cbOneTimeBI));
+    VK_CHECK(vkBeginCommandBuffer(cb, &cbOneTimeBI));
 
     VkImageMemoryBarrier2 barrierTexImage = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -283,7 +269,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
         .image = texture->image,
         .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
         .subresourceRange.levelCount = mipLevels,
-        .subresourceRange.layerCount = layerCount,
+        .subresourceRange.layerCount = desc.layerCount,
     };
 
     VkDependencyInfo barrierTexInfo = {
@@ -292,7 +278,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
         .pImageMemoryBarriers = &barrierTexImage,
     };
 
-    vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
+    vkCmdPipelineBarrier2(cb, &barrierTexInfo);
 
     // Allocate enough space for all copy regions (e.g. up to 13 mips * 6 faces = 78 regions)
     VkBufferImageCopy copyRegions[256];
@@ -312,7 +298,7 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
         if (mipWidth == 0) mipWidth = 1;
         if (mipHeight == 0) mipHeight = 1;
 
-        for (u32 layer = 0; layer < layerCount; layer++) {
+        for (u32 layer = 0; layer < desc.layerCount; layer++) {
             VkBufferImageCopy region = {0};
 
             region.bufferOffset = layer * faceSize + mipStartOffset;
@@ -334,10 +320,10 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
 
         mipStartOffset += pitch;
     }
-    u32 copyCount = mipLevels * layerCount;
-    vkCmdCopyBufferToImage(cbOneTime, scratch->buffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copyCount, copyRegions);
+    u32 copyCount = mipLevels * desc.layerCount;
+    vkCmdCopyBufferToImage(cb, ctx->scratchBuffer.buffer, texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, copyCount, copyRegions);
 
-    LV_ASSERT(faceSize * layerCount == imageSize);
+    LV_ASSERT(faceSize * desc.layerCount == imageSize);
 
     VkImageMemoryBarrier2 barrierTexRead = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -350,31 +336,30 @@ b8 CreateTexture(texture_resource_t *texture, buffer_t *scratch, VkDevice device
         .image = texture->image,
         .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
         .subresourceRange.levelCount = mipLevels,
-        .subresourceRange.layerCount = layerCount,
+        .subresourceRange.layerCount = desc.layerCount,
     };
 
     barrierTexInfo.pImageMemoryBarriers = &barrierTexRead;
 
-    vkCmdPipelineBarrier2(cbOneTime, &barrierTexInfo);
+    vkCmdPipelineBarrier2(cb, &barrierTexInfo);
 
-    VK_CHECK(vkEndCommandBuffer(cbOneTime));
+    VK_CHECK(vkEndCommandBuffer(cb));
 
     VkSubmitInfo oneTimeSI = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
-        .pCommandBuffers = &cbOneTime
+        .pCommandBuffers = &cb
     };
 
-    VK_CHECK(vkQueueSubmit(queue, 1, &oneTimeSI, fenceOneTime));
-    VK_CHECK(vkWaitForFences(device, 1, &fenceOneTime, VK_TRUE, UINT64_MAX));
-
-    vkFreeCommandBuffers(device, pool, 1, &cbOneTime);
-    vkDestroyFence(device, fenceOneTime, NULL);
+    VK_CHECK(vkResetFences(ctx->device, 1, &fence));
+    VK_CHECK(vkQueueSubmit(ctx->queue, 1, &oneTimeSI, fence));
+    VK_CHECK(vkWaitForFences(ctx->device, 1, &fence, VK_TRUE, UINT64_MAX));
 
     success = true;
 
     texture->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    texture->layerCount = layerCount;
+    texture->layerCount = desc.layerCount;
+    texture->format = format;
 exit:
     if (file) {
         fclose(file);
@@ -429,6 +414,29 @@ VkSampler CreateCubemapSampler(VkDevice device, u32 numLevels, f32 maxAnisotropy
     return result;
 }
 
+VkSampler CreateLUTSampler(VkDevice device, u32 numLevels, f32 maxAnisotropy)
+{
+    VkSampler result = VK_NULL_HANDLE;
+    VkSamplerCreateInfo samplerCI = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .anisotropyEnable = VK_TRUE,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .mipLodBias = 0.0f,
+        .compareOp = VK_COMPARE_OP_NEVER,
+        .minLod = 0.0f,
+        .maxLod = numLevels > 0 ? (f32)(numLevels - 1) : 0.0f,
+        .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
+        .maxAnisotropy = maxAnisotropy,
+    };
+    VK_CHECK(vkCreateSampler(device, &samplerCI, NULL, &result));
+    return result;
+}
+
 VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, u32 mipLevels, u32 layerCount)
 {
     VkImageViewCreateInfo viewCI = {
@@ -449,8 +457,11 @@ VkImageView CreateImageView(VkDevice device, VkImage image, VkFormat format, VkI
     return view;
 }
 
-VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  VkImageUsageFlags usage, u32 width, u32 height, u32 mipLevels, u32 layerCount, VmaAllocation *allocation)
+VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  VkImageUsageFlags usage, u32 width, u32 height, u32 mipLevels, u32 layerCount, VkSampleCountFlagBits samples, VmaAllocation *allocation)
 {
+    // Multisampled images cannot be mipmapped or arrayed
+    LV_ASSERT(samples == VK_SAMPLE_COUNT_1_BIT || (mipLevels == 1 && layerCount == 1));
+
     VkImageCreateInfo imgCI = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
@@ -458,7 +469,7 @@ VkImage CreateImage(VkDevice device, VmaAllocator allocator, VkFormat format,  V
         .extent = {.width = width, .height = height, .depth = 1},
         .mipLevels = mipLevels,
         .arrayLayers = layerCount,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .samples = samples,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = usage,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,

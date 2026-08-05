@@ -25,3 +25,16 @@ float4 fromsrgb(float4 c)
     return float4(pow(c.xyz, float3(2.2)), c.w);
 }
 
+float hash(uint n) {
+    // integer hash copied from Hugo Elias
+    n = (n << 13U) ^ n;
+    n = n * (n * n * 15731U + 0x789221U) + 0x1376312589U;
+    return float(n & uint(0x7fffffffU)) / float(0x7fffffff);
+}
+
+float2 UniformToGaussian(float u1, float u2) {
+    float R = sqrt(-2.0f * log(u1));
+    float theta = 2.0f * PI * u2;
+    
+    return float2(R * cos(theta), R * sin(theta));
+}
